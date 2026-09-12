@@ -32,21 +32,49 @@
 
 ## 快速开始
 
+支持 **Windows / macOS / Linux**。需要 Python 3.10 或更高版本。
+
+### 方式一：pip 安装（推荐）
+
 ```bash
-# 1. 克隆
-git clone <repo-url> && cd readloops
+pip install readloops
 
-# 2. 创建虚拟环境并安装依赖
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# 3. 启动
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+readloops init     # 初始化数据库
+readloops          # 启动，并自动打开浏览器
 ```
 
-打开 <http://127.0.0.1:8000>，进入「设置」填入 AI API Key，即可生成第一篇文章。
+> 若提示 `readloops: command not found`，说明 Python 的脚本目录不在 PATH 中。
+> 改用 `python -m app.cli` 或参考下方「方式二」。
 
-> 首次启动会自动创建 `data/yuedu.db` 并建表。但**词库为空时无法生成文章**，见下一节。
+### 方式二：从源码安装
+
+```bash
+git clone <repo-url> && cd readloops
+
+# 创建虚拟环境
+python3 -m venv .venv
+
+# 激活（按系统选择）
+source .venv/bin/activate        # macOS / Linux
+.venv\Scripts\activate           # Windows (PowerShell / CMD)
+
+pip install -e .                 # 以可编辑模式安装
+readloops                        # 启动
+```
+
+### 命令行说明
+
+| 命令 | 作用 |
+|------|------|
+| `readloops` | 启动服务并打开浏览器（默认命令） |
+| `readloops serve` | 只启动服务 |
+| `readloops serve --port 9000 --no-browser` | 自定义端口、不打开浏览器 |
+| `readloops init` | 初始化数据库 |
+| `readloops doctor` | 检查运行环境是否就绪 |
+
+启动后访问 <http://127.0.0.1:8000>，进入「设置」填入 AI API Key，即可生成第一篇文章。
+
+> 首次启动会自动创建数据库并建表。但**词库为空时无法生成文章**，见下一节。
 
 ## 数据准备（重要）
 
@@ -80,16 +108,34 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 | `AI_BASE_URL` | `https://api.deepseek.com` | AI 接口地址 |
 | `AI_API_KEY` | 空 | API Key（也可在网页「设置」中填写，存于数据库） |
 | `AI_MODEL` | `deepseek-flash` | 模型名 |
+| `READLOOPS_DATA_DIR` | 见下 | 数据目录（数据库存放位置） |
+| `READLOOPS_DB_PATH` | `<数据目录>/yuedu.db` | 数据库文件路径 |
 | `READLOOPS_CORPUS_FILE` | `语料库/真题阅读纯文本/all_passages_lazynote.json` | 真题语料路径 |
 | `READLOOPS_CORPUS_DIR` | `语料库/真题阅读纯文本` | 抓取脚本输出目录 |
+
+### 数据目录在哪
+
+程序会自动选择合适的位置，无需手动配置：
+
+| 运行方式 | 数据目录 |
+|----------|----------|
+| 源码模式（项目根有 `pyproject.toml`） | `<项目根>/data` |
+| pip 安装 · Windows | `%LOCALAPPDATA%\ReadLoops` |
+| pip 安装 · macOS | `~/Library/Application Support/ReadLoops` |
+| pip 安装 · Linux | `~/.local/share/readloops` |
+
+用 `readloops doctor` 可随时查看当前实际路径。想自定义就设 `READLOOPS_DATA_DIR`。
+
+> 数据库**不会**写入 Python 安装目录（site-packages），升级或卸载包不会影响你的数据。
 
 ## 项目结构
 
 ```
 readloops/
 ├── app/
+│   ├── cli.py               # 命令行入口（readloops serve / init / doctor）
 │   ├── main.py              # FastAPI 入口
-│   ├── config.py            # 路径与全局配置
+│   ├── config.py            # 路径与全局配置（跨平台数据目录）
 │   ├── database.py          # SQLite schema（10 表）+ init_db
 │   ├── models.py            # 数据模型
 │   ├── api/                 # 路由：articles / words / reading / stats
