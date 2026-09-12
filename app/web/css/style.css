@@ -1989,3 +1989,81 @@ body {
   transition: background var(--transition);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
+
+/* ========== 应用弹窗（替换原生 confirm/alert） ========== */
+.app-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.app-dialog-overlay.show { opacity: 1; }
+
+.app-dialog {
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: 12px;
+  padding: 24px 28px;
+  max-width: 360px;
+  width: 90%;
+  box-shadow: var(--glass-shadow);
+  transform: scale(0.95);
+  transition: transform 0.2s ease;
+}
+.app-dialog-overlay.show .app-dialog { transform: scale(1); }
+
+.app-dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+.app-dialog-msg {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+.app-dialog-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.app-dialog-actions button {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border-strong);
+  background: var(--glass);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.app-dialog-actions button:hover {
+  background: var(--highlight);
+}
+.app-dialog-actions .btn-danger {
+  background: rgba(220, 60, 60, 0.18);
+  border-color: rgba(220, 60, 60, 0.35);
+  color: #ff8a8a;
+}
+.app-dialog-actions .btn-danger:hover {
+  background: rgba(220, 60, 60, 0.28);
+}
+.app-dialog-actions .btn-primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.app-dialog-actions .btn-primary:hover {
+  background: var(--accent-hover);
+}
