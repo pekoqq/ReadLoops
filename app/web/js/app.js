@@ -25,6 +25,73 @@ const api = {
   }
 };
 
+/**
+ * 应用内确认对话框（替代原生 confirm）。
+ *
+ * 为什么不用原生 confirm()：在 Chrome「应用模式」（--app=）与已安装的 PWA 中，
+ * 原生弹窗可能被浏览器拦截或用户曾勾选「阻止此页面创建更多对话框」，
+ * 此时 confirm() 会静默返回 false —— 表现为「点了删除没反应」。
+ * 用应用内自绘对话框可彻底规避，且样式与应用一致。
+ *
+ * @returns {Promise<boolean>} 用户是否确认
+ */
+function confirmDialog(message, { okText = '确定', cancelText = '取消', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'app-dialog-overlay';
+    overlay.innerHTML =
+      '<div class="app-dialog" role="dialog" aria-modal="true">' +
+        '<div class="app-dialog-message">' + escapeHtml(message) + '</div>' +
+        '<div class="app-dialog-actions">' +
+          '<button class="toolbar-btn" data-act="cancel">' + escapeHtml(cancelText) + '</button>' +
+          '<button class="toolbar-btn ' + (danger ? 'danger' : 'primary') + '" data-act="ok">' +
+            escapeHtml(okText) +
+          '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    const okBtn = overlay.querySelector('[data-act="ok"]');
+    const done = (val) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(val);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') done(false);
+      else if (e.key === 'Enter') done(true);
+    };
+
+    okBtn.addEventListener('click', () => done(true));
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', () => done(false));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(false); });
+    document.addEventListener('keydown', onKey);
+    okBtn.focus();
+  });
+}
+
+/** 应用内提示框（替代原生 alert）。 */
+function showAlert(message) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'app-dialog-overlay';
+    overlay.innerHTML =
+      '<div class="app-dialog" role="dialog" aria-modal="true">' +
+        '<div class="app-dialog-message">' + escapeHtml(message) + '</div>' +
+        '<div class="app-dialog-actions">' +
+          '<button class="toolbar-btn primary" data-act="ok">知道了</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    const okBtn = overlay.querySelector('[data-act="ok"]');
+    const done = () => { overlay.remove(); resolve(); };
+    okBtn.addEventListener('click', done);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(); });
+    okBtn.focus();
+  });
+}
+
 function toast(msg, duration = 2000) {
   const t = document.createElement('div');
   t.className = 'toast';
@@ -868,8 +935,8 @@ async function loadArticlesList() {
       e.stopPropagation();
       const id = btn.getAttribute('data-id');
       console.log('删除文章 id:', id, typeof id);
-      if (!id || id === 'undefined') { alert('文章ID无效'); return; }
-      if (!confirm('确定删除这篇文章吗？')) return;
+      if (!id || id === 'undefined') { await showAlert('文章ID无效'); return; }
+      if (!await confirmDialog('确定删除这篇文章吗？', { danger: true })) return;
       try {
         const url = window.location.origin + '/api/articles/' + id;
         console.log('删除URL:', url);
@@ -884,7 +951,7 @@ async function loadArticlesList() {
         toast('文章已删除');
       } catch(err) {
         console.error('删除错误:', err);
-        alert('删除失败: ' + err.message);
+        await showAlert('删除失败: ' + err.message);
       }
     });
   });
@@ -1087,7 +1154,7 @@ async function loadVocab() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.dataset.id;
-      if (!confirm('确定删除这个词？')) return;
+      if (!await confirmDialog('确定删除这个词？', { danger: true })) return;
       await api.delete(`/api/words/${id}`);
       toast('已删除');
       loadVocab();
@@ -1124,7 +1191,7 @@ async function loadVocab() {
   if (batchDel) {
     batchDel.addEventListener('click', async () => {
       if (selectedWordIds.size === 0) { toast('请先选择'); return; }
-      if (!confirm(`确定删除选中的 ${selectedWordIds.size} 个词？`)) return;
+      if (!await confirmDialog(`确定删除选中的 ${selectedWordIds.size} 个词？`, { danger: true })) return;
       await api.post('/api/words/batch-delete', { word_ids: [...selectedWordIds] });
       toast(`已删除 ${selectedWordIds.size} 个词`);
       loadVocab();
