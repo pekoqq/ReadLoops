@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS test_questions (
 
 CREATE INDEX IF NOT EXISTS idx_words_status ON words(status);
 CREATE INDEX IF NOT EXISTS idx_words_level ON words(level);
+CREATE INDEX IF NOT EXISTS idx_words_lemma ON words(lemma);
 CREATE INDEX IF NOT EXISTS idx_phrases_level ON phrases(level);
 CREATE INDEX IF NOT EXISTS idx_test_questions_test_id ON test_questions(test_id);
 CREATE INDEX IF NOT EXISTS idx_test_questions_word_id ON test_questions(word_id);

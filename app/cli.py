@@ -93,6 +93,36 @@ def cmd_doctor(args):
     return 0 if ok else 1
 
 
+def cmd_import_dict(args):
+    """导入词典 / 词表文件。"""
+    from app.services.dict_import import import_dictionary
+
+    print(f"导入词表：{args.path}")
+    if args.level:
+        print(f"  仅导入等级：{args.level}")
+
+    def progress(n):
+        print(f"  已导入 {n} 词...")
+
+    try:
+        result = import_dictionary(args.path, level_filter=args.level, on_progress=progress)
+    except FileNotFoundError as exc:
+        print(f"❌ {exc}")
+        return 1
+
+    from app.database import get_db
+    with get_db() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM words").fetchone()[0]
+
+    print()
+    print("导入完成")
+    print(f"  识别格式　：{result['format']}")
+    print(f"  新增　　　：{result['inserted']} 词")
+    print(f"  已存在跳过：{result['skipped']} 词")
+    print(f"  词库总量　：{total} 词")
+    return 0
+
+
 def cmd_serve(args):
     """启动服务。"""
     import uvicorn
@@ -123,6 +153,11 @@ def main(argv=None):
 
     sub.add_parser("init", help="初始化数据库").set_defaults(func=cmd_init)
     sub.add_parser("doctor", help="检查运行环境").set_defaults(func=cmd_doctor)
+
+    p_import = sub.add_parser("import-dict", help="导入词典 / 词表文件")
+    p_import.add_argument("path", help="文件路径（支持 ECDICT CSV/JSON、纯文本词表）")
+    p_import.add_argument("--level", help="只导入指定等级，如 CET4")
+    p_import.set_defaults(func=cmd_import_dict)
 
     args = parser.parse_args(argv)
 
