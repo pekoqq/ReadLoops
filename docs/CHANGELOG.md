@@ -1,4 +1,31 @@
-# 约读阅读器 — 变更日志
+# ReadLoops — 变更日志
+
+## [2.2.3] - 2026-09-13
+
+### 修复
+- **`POST /api/words/test/start` 返回 500**：SQL 引用了 `tests` 表不存在的 `user_id` 列
+  - 后果：测试记录创建失败 → `testId` 为 null → **测试成绩不入库**，FSRS 与统计不更新
+  - 修复：SQL 对齐为 `INSERT INTO tests (type, status, created_at)`
+- **`tests` 表 schema 漂移**：真实库缺 `status` / `total` / `completed_at`，导致 `stats.py` 的测试接口同样 500
+  - 修复：`init_db()` 新增 `_ensure_columns()`，启动时**幂等补齐缺失列**，从机制上杜绝此类漂移
+
+### 新增
+- `tests/test_api_endpoints.py`：15 个接口级用例，覆盖全部只读端点与测试记录流程
+- 测试总数 19 → **34**
+
+## [2.2.2] - 2026-09-13（首个开源版本）
+
+### 开源
+- 从私有项目脱敏导出为独立仓库，历史从零，采用 MIT 许可证
+- 剔除个人数据与版权语料，改为「用户自备」并在 README 说明
+- 修复 9 处硬编码绝对路径 → 项目相对路径 + `READLOOPS_*` 环境变量
+- 补齐 `database.py` schema（原缺 `phrases` / `test_questions` 表与 5 个 words 列，全新安装会崩溃）
+
+### 工程化
+- 引入 ruff + pytest + pre-commit + GitHub Actions CI
+- 新增 `README.md`、`CONTRIBUTING.md`（含代码审查清单）、`CODE_OF_CONDUCT.md`、`docs/ARCHITECTURE.md`
+
+---
 
 ## [2.2.1] - 2026-09-13（交接文档 + 文件索引校正）
 

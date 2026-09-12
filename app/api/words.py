@@ -171,7 +171,7 @@ async def start_test():
     now = int(time.time())
     with get_db() as conn:
         cur = conn.execute(
-            "INSERT INTO tests (user_id, type, created_at) VALUES (1, 'vocab', ?)",
+            "INSERT INTO tests (type, status, created_at) VALUES ('vocab', 'in_progress', ?)",
             (now,)
         )
         test_id = cur.lastrowid

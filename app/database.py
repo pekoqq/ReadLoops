@@ -143,12 +143,41 @@ DEFAULT_SETTINGS = {
 }
 
 
+# 列级迁移：为历史遗留数据库补齐 SCHEMA 中新增的列（幂等，可重复执行）
+# 背景：CREATE TABLE IF NOT EXISTS 不会改动已存在的表，导致旧库缺列、代码报
+#       "table X has no column named Y"。这里统一在启动时补齐，避免 schema 漂移。
+COLUMN_MIGRATIONS = {
+    "words": {
+        "exchange": "TEXT",
+        "wrong_count": "INTEGER DEFAULT 0",
+        "correct_count": "INTEGER DEFAULT 0",
+        "last_test_at": "INTEGER",
+        "srs_interval": "REAL DEFAULT 0",
+    },
+    "tests": {
+        "status": "TEXT DEFAULT 'in_progress'",
+        "total": "INTEGER DEFAULT 0",
+        "completed_at": "INTEGER",
+    },
+}
+
+
+def _ensure_columns(conn):
+    """补齐各表缺失的列（幂等）。"""
+    for table, columns in COLUMN_MIGRATIONS.items():
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def init_db():
-    """初始化数据库，建表并插入默认数据。"""
+    """初始化数据库：建表、补齐缺失列、插入默认数据。"""
     import time
     now = int(time.time())
     with get_db() as conn:
         conn.executescript(SCHEMA)
+        _ensure_columns(conn)
         # 默认用户
         conn.execute("INSERT OR IGNORE INTO users (id, name, created_at) VALUES (1, '用户1', ?)", (now,))
         # 默认设置
