@@ -1,0 +1,45 @@
+# ---- 数据（严禁入库：可能含个人数据与密钥）----
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---- 语料（版权材料，需用户自备）----
+语料库/
+corpus/
+
+# ---- 密钥与本地配置 ----
+.env
+.env.*
+*.key
+secrets*
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# ---- 测试与覆盖率 ----
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---- 工具缓存 ----
+.ruff_cache/
+.mypy_cache/
+
+# ---- 系统与编辑器 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# ---- 日志 ----
+*.log

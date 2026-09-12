@@ -1,0 +1,49 @@
+[project]
+name = "readloops"
+version = "2.2.1"
+description = "AI 驱动的英语阅读训练器：可理解输入 + FSRS 间隔重复"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pre-commit>=3.7",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+exclude = [".venv", "app/web"]
+
+[tool.ruff.lint]
+# 保守起步：只启用能抓真实问题的规则集，避免一次性引入海量告警
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # 行宽交给 formatter
+    "E402",  # 允许模块级 import 不在顶部（部分脚本依赖路径设置）
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401", "F811"]
+"tools/*" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = "-q"
+asyncio_mode = "auto"

@@ -1,0 +1,136 @@
+{
+  "name": "四级真题阅读风格参数",
+  "version": "1.0",
+  "based_on": "205篇四级真题阅读（135篇仔细阅读 + 70篇长篇阅读），2015-2026年",
+  "total_words": 122566,
+  "total_sentences": 6024,
+
+  "text_features": {
+    "target_article_length": "300-350词（短篇阅读）",
+    "average_sentence_length": 20.3,
+    "median_sentence_length": 18,
+    "sentence_length_distribution": {
+      "short (<=10 words)": "18.4%",
+      "medium (11-20 words)": "40.0%",
+      "long (>20 words)": "41.6%"
+    },
+    "average_word_length": 4.79,
+    "word_length_distribution": {
+      "short (<=3 letters)": "36.2%",
+      "medium (4-6 letters)": "40.1%",
+      "long (>=7 letters)": "23.7%"
+    }
+  },
+
+  "sentence_structure": {
+    "compound_sentences": "51.9%（含 and/but/or/so）",
+    "relative_clauses": "32.0%（含 which/that/who）",
+    "adverbial_clauses": "30.8%（含 because/although/if/when/while 等）",
+    "top_conjunctions": [
+      {"word": "and", "count": 2267},
+      {"word": "that", "count": 1522},
+      {"word": "as", "count": 669},
+      {"word": "but", "count": 625},
+      {"word": "or", "count": 554},
+      {"word": "when", "count": 358},
+      {"word": "who", "count": 337},
+      {"word": "if", "count": 308},
+      {"word": "so", "count": 263},
+      {"word": "which", "count": 227},
+      {"word": "because", "count": 170},
+      {"word": "while", "count": 145}
+    ]
+  },
+
+  "structure": {
+    "opening_styles": {
+      "冠词开头 (The/A/An)": "常见，约12%",
+      "从句开头 (If/When/Although)": "约6%",
+      "名词短语开头": "最常见，约40%",
+      "疑问句开头 (Why/How/What)": "约8%",
+      "介词短语开头 (Across/In/Despite)": "约10%",
+      "其他": "约24%"
+    },
+    "ending_styles": {
+      "陈述事实结尾": "52.7%",
+      "情态动词结尾 (may/could/should/would)": "36.1%",
+      "转折结尾 (but/however)": "9.8%",
+      "强调重要性结尾": "1.5%"
+    },
+    "typical_opening_examples": [
+      "Some of the world's most significant problems never hit headlines.",
+      "The endless debate about work-life balance often contains a hopeful footnote.",
+      "If you think a high-factor sunscreen keeps you safe, you may be wrong.",
+      "Across the rich world, well-educated people increasingly work longer.",
+      "Boys' schools are the perfect place to teach young men to express their emotions."
+    ],
+    "typical_ending_examples": [
+      "The trouble is that the forecast assumes continued improvements in yields, which may not actually happen.",
+      "In the foreseeable future, stay-at-home fathers may make all the difference for individual families.",
+      "So if there is a heat wave this summer, it would be best for us to slip on a shirt and slap on a hat.",
+      "Technological change may well reinforce that shift: the skills that complement computers do not necessarily decline with age."
+    ]
+  },
+
+  "vocabulary": {
+    "top_content_words": [
+      "people", "one", "time", "new", "work", "says", "like", "said",
+      "students", "food", "many", "even", "just", "make", "life", "study",
+      "way", "found", "years", "research", "school", "women", "good", "day"
+    ],
+    "top_phrases": [
+      "high school", "years ago", "long term", "young people", "new york",
+      "fast food", "work life", "social media", "climate change", "life balance",
+      "united states", "health care", "mental health", "public schools",
+      "college students", "real estate", "low income", "human resources"
+    ],
+    "vocabulary_richness": "8.3%（不同词/总词）"
+  },
+
+  "topics": {
+    "distribution": {
+      "科技/互联网": "最高频",
+      "社会/生活": "高频",
+      "环境/气候": "高频",
+      "教育/学习": "高频",
+      "健康/医学": "高频",
+      "商业/经济": "中频",
+      "心理/行为": "中频"
+    },
+    "common_themes": [
+      "工作与生活平衡",
+      "教育改革与学生压力",
+      "健康饮食与生活方式",
+      "科技对社会的影响",
+      "气候变化与环境",
+      "性别平等与职场",
+      "心理健康与压力",
+      "社交媒体与人际关系",
+      "经济不平等与贫困",
+      "人工智能与未来工作"
+    ]
+  },
+
+  "writing_style_rules": {
+    "do": [
+      "用客观、信息性的语气写作",
+      "从具体场景、事实或研究发现开头",
+      "包含具体数字、数据和研究结果",
+      "使用 and, but, that, which, when, if 等连接词",
+      "混合使用简单句、复合句和复杂句（平均句长20词）",
+      "用情态动词(may/could/should)结尾表达推测或建议",
+      "引用研究、专家或数据来支撑观点",
+      "讨论社会现象、科技影响、健康、教育等话题"
+    ],
+    "dont": [
+      "不要用 In today's fast-paced world 开头",
+      "不要用 In conclusion, Therefore, As we all know 结尾",
+      "不要用 It is important to note that 这类套话",
+      "不要写过于口语化或随意的表达",
+      "不要用第一人称 I/we 表达个人观点（用研究/数据说话）",
+      "不要写过于情绪化或主观的语言",
+      "不要用感叹号",
+      "不要写过于简短的句子（少于5词的句子要少）"
+    ]
+  }
+}

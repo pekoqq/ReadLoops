@@ -1,0 +1,24 @@
+{
+  "name": "ReadLoops",
+  "short_name": "ReadLoops",
+  "description": "AI 驱动的英语阅读训练器",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1c",
+  "theme_color": "#1a1a1c",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

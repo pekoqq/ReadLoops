@@ -1,0 +1,248 @@
+# 四级真题阅读风格分析报告
+
+> 分析基于 205 篇真题阅读文章
+
+## 文本特征
+
+- **总文章数**: 205
+- **总句数**: 6024
+- **总词数**: 122566
+- **平均每篇词数**: 597.9
+- **平均每篇段落数**: 1.0
+- **平均句长（词）**: 20.3
+- **句长中位数**: 18
+- **短句占比(<=10词)**: 18.4%
+- **中句占比(11-20词)**: 40.0%
+- **长句占比(>20词)**: 41.6%
+- **平均词长**: 4.79
+- **短词占比(<=3)**: 36.2%
+- **中词占比(4-6)**: 40.1%
+- **长词占比(>=7)**: 23.7%
+
+## 句式特征
+
+### 连接词TOP15
+
+- and: 2267
+- that: 1522
+- as: 669
+- but: 625
+- or: 554
+- when: 358
+- who: 337
+- if: 308
+- so: 263
+- which: 227
+- because: 170
+- while: 145
+- after: 120
+- where: 112
+- however: 83
+
+- **复合句占比(含and/but/or/so)**: 51.9%
+- **定语从句占比(which/that/who)**: 32.0%
+- **状语从句占比(because/although/if等)**: 30.8%
+
+## 结构特征
+
+### 开头方式分布
+
+- 其他(part): 51
+- 冠词开头(The/A): 25
+- 其他(why): 9
+- 其他(how): 9
+- 从句开头(When/If): 6
+- 其他(is): 4
+- 其他(what): 4
+- 其他(can): 3
+- 其他(to): 2
+- 名词复数开头(People): 2
+- 代词开头(It/This): 2
+- 其他(who): 2
+- 其他(are): 2
+- 其他(do): 2
+- 其他(new): 2
+- 其他(human): 1
+- 其他(one): 1
+- 其他(in): 1
+- 其他(early): 1
+- 其他(crisis): 1
+- 其他(easter): 1
+- 其他(spending): 1
+- 其他(deep): 1
+- 其他(pepsico): 1
+- 其他(cats): 1
+- 其他(would): 1
+- 其他(til): 1
+- 其他(tall): 1
+- 其他(depressed): 1
+- 其他(thinking): 1
+- 其他(despite): 1
+- 其他(meet): 1
+- 其他(philadelphia): 1
+- 其他(europe): 1
+- 其他(does): 1
+- 其他(we): 1
+- 其他(building): 1
+- 其他(waking): 1
+- 其他(sugar): 1
+- 其他(you): 1
+- 其他(so): 1
+- 其他(remote): 1
+- 其他(should): 1
+- 其他(opinion): 1
+- 其他(public): 1
+- 其他(employees): 1
+- 其他(op): 1
+- 其他(saving): 1
+- 其他(time): 1
+- 其他(refugees): 1
+- 其他(top): 1
+- 其他(let): 1
+- 其他(female): 1
+- 其他(competitive): 1
+- 其他(red): 1
+- 其他(overcoming): 1
+- 其他(book): 1
+- 其他(trailblazing): 1
+- 其他(chocolate): 1
+- 其他(decades): 1
+- 其他(timing): 1
+- 其他(music): 1
+- 其他(knowledge): 1
+- 其他(reaping): 1
+- 其他(essay): 1
+- 其他(joy): 1
+- 其他(finding): 1
+- 其他(ancient): 1
+- 其他(could): 1
+- 其他(team): 1
+- 其他(from): 1
+- 其他(some): 1
+- 其他(food): 1
+- 其他(explainer): 1
+- 其他(for): 1
+- 其他(on): 1
+- 其他(asouth): 1
+- 其他(doctor): 1
+- 其他(poverty): 1
+- 其他(anumeric): 1
+- 其他(career): 1
+- 其他(there): 1
+- 其他(spread): 1
+- 其他(evil): 1
+- 其他(hyphenating): 1
+- 其他(here): 1
+- 其他(more): 1
+- 其他(teenagers): 1
+- 其他(present): 1
+- 其他(no): 1
+- 其他(fewer): 1
+- 其他(quot): 1
+- 其他(looking): 1
+- 其他(exercise): 1
+- 其他(things): 1
+
+### 结尾方式分布
+
+- 陈述事实结尾: 108
+- 情态动词结尾(建议/推测): 74
+- 转折结尾: 20
+- 强调重要性结尾: 3
+
+### 开头示例
+
+- 标题: 2015年6月英语四级真题第1套 Part III Section C (1)
+Some of the worlds most significant problems never hit headlines.
+- 标题: 2015年6月英语四级真题第1套 Part III Section C (2)
+The endless debate about &quot;work-life balance&quot; often contains a hopeful footnote about stay-at-home dads.
+- 标题: 2015年6月英语四级真题第2套 Part III Section C (1)
+If you think a high-factor sunscreen(防晒霜) keeps you safe from harmful rays, you may be wrong.
+- 标题: 2015年6月英语四级真题第2套 Part III Section C (2)
+Across the rich world, well-educated people increasingly work longer than the less-skilled.
+- 标题: 2015年6月英语四级真题第3套 Part III Section C (1)
+Boys schools are the perfect place to teach young men to express their emotions and involve them in activities such as art, dance and music.
+
+### 结尾示例
+
+- The trouble is that the forecast assumes continued improvements in yields, which may not actually happen.
+- In the foreseeable future, stay-at-home fathers may make all the difference for individual families, but their presence wont reduce the numbers of high-potential women who are forced to choose between family and career.
+- So if there is a heat wave this summer, it would be best for us, too, to slip on a shirt, slop on(补上) sunscreen and slap on a hat.
+- Technological change may well reinforce that shift: the skills that complement computers, from management know-how to creativity, do not necessarily decline with age.
+- &quot;In mixed schools, boys feel compelled to act like men before they understand themselves well enough to know what that means,&quot; the study reported.
+
+
+## 词汇特征
+
+### 高频实词TOP30
+
+- quot: 2024
+- people: 514
+- one: 359
+- time: 290
+- new: 283
+- work: 282
+- says: 263
+- like: 256
+- said: 248
+- students: 235
+- food: 232
+- many: 215
+- even: 210
+- just: 194
+- make: 191
+- life: 184
+- because: 177
+- study: 174
+- way: 169
+- much: 165
+- found: 163
+- years: 163
+- year: 161
+- research: 160
+- school: 158
+- women: 152
+- get: 147
+- while: 146
+- good: 146
+- day: 137
+
+### 高频短语TOP20
+
+- quot says: 87
+- said quot: 58
+- section c: 51
+- u s: 49
+- says quot: 47
+- part iii: 46
+- iii section: 46
+- high school: 34
+- quot said: 34
+- years ago: 31
+- long term: 30
+- young people: 28
+- new york: 27
+- fast food: 25
+- work life: 24
+- united states: 24
+- quot quot: 24
+- social media: 24
+- climate change: 23
+- life balance: 21
+
+- **词汇丰富度(不同词/总词)**: 8.3%
+
+## 题材分布
+
+### 题材分布
+
+- 科技/互联网: 203
+- 社会/生活: 195
+- 环境/气候: 183
+- 教育/学习: 168
+- 健康/医学: 163
+- 商业/经济: 133
+- 心理/行为: 115
+
+- **说明**: 一篇文章可能匹配多个题材
+

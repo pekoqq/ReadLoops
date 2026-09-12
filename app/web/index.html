@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ReadLoops</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1a1a1c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="stylesheet" href="/static/css/style.css?v=37">
+</head>
+<body>
+  <!-- 液态玻璃 SVG 滤镜（边缘折射效果） -->
+  <svg style="position:absolute;width:0;height:0;pointer-events:none;" aria-hidden="true">
+    <defs>
+      <filter id="liquid-glass" x="0%" y="0%" width="100%" height="100%" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" seed="5" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="6" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="liquid-glass-strong" x="0%" y="0%" width="100%" height="100%" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.008" numOctaves="3" seed="8" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="10" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <!-- 全屏涟漪扭曲滤镜：feTurbulence流动噪声 + feDisplacementMap像素扭曲 -->
+      <filter id="ripple-distort" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+        <feTurbulence id="ripple-turbulence" type="fractalNoise" baseFrequency="0.015" numOctaves="2" seed="3" result="noise"/>
+        <feDisplacementMap id="ripple-displace" in="SourceGraphic" in2="noise" scale="0" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+    </defs>
+  </svg>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">ReadLoops</div>
+      <nav class="sidebar-nav">
+        <div class="nav-section">阅读</div>
+        <div class="nav-item active" data-view="reader">阅读</div>
+        <div class="nav-item" data-view="articles">历史文章</div>
+        <div class="nav-section">词汇</div>
+        <div class="nav-item" data-view="vocab">生词本</div>
+        <div class="nav-item" data-view="test">单词测试</div>
+        <div class="nav-item" data-view="stats">统计</div>
+      </nav>
+      <div class="sidebar-footer">
+        <label for="themeSelect">主题</label>
+        <select id="themeSelect">
+          <option value="dark" selected>深色</option>
+          <option value="paper">纸质护眼</option>
+          <option value="light">明亮</option>
+          <option value="black">纯黑</option>
+        </select>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="toolbar">
+        <button class="toolbar-btn icon" id="toggleSidebar" title="折叠边栏">[≡]</button>
+        <button class="toolbar-btn primary" id="generateBtn">生成文章</button>
+        <span id="generateStatus" style="font-size:11px; color:var(--text-secondary);"></span>
+        <div class="toolbar-spacer"></div>
+        <button class="toolbar-btn" id="addWordBtn">+ 生词</button>
+        <button class="toolbar-btn large" id="settingsBtn" title="设置">设置</button>
+        <button class="toolbar-btn" id="lookupHistoryBtn" title="查词历史">查词</button>
+        <button class="toolbar-btn" id="focusBtn">专注</button>
+      </header>
+
+      <div class="reader-container" id="readerContainer">
+        <article class="reader" id="reader">
+          <div class="empty">
+            <h2>ReadLoops</h2>
+            <p>点击「生成文章」开始阅读训练</p>
+            <p style="margin-top:12px; font-size:11px;">空格 计时 · 选中文字 查词</p>
+          </div>
+        </article>
+      </div>
+
+      <footer class="timer-bar">
+        <span>阅读时间</span>
+        <span class="timer-time" id="timerDisplay">00:00</span>
+        <button class="timer-btn" id="timerBtn">开始 [空格]</button>
+        <span style="margin-left:20px;" id="articleMeta"></span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="lookup-panel" id="lookupPanel">
+    <div class="word" id="lpWord"></div>
+    <div class="phonetic" id="lpPhonetic"></div>
+    <div class="meaning" id="lpMeaning">查询中...</div>
+    <div class="actions">
+      <button class="action-btn" id="lpPronounce">发音</button>
+      <button class="action-btn" id="lpHighlight">高亮</button>
+      <button class="action-btn" id="lpAdd">加入生词本</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <h2>设置</h2>
+      <div class="form-group">
+        <label>AI 服务商</label>
+        <select id="settingProvider">
+          <option value="deepseek" selected>DeepSeek</option>
+          <option value="opencode">OpenCode Zen</option>
+          <option value="openai">OpenAI</option>
+          <option value="custom">自定义</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>API Base URL</label>
+        <input type="text" id="settingBaseUrl" placeholder="https://opencode.ai/zen/v1">
+      </div>
+      <div class="form-group">
+        <label>API Key</label>
+        <input type="password" id="settingApiKey" placeholder="从 opencode.ai 获取">
+      </div>
+      <div class="form-group">
+        <label>模型</label>
+        <select id="settingModel">
+          <optgroup label="DeepSeek">
+            <option value="deepseek-flash">deepseek-flash (V4.1, 最新, 推荐)</option>
+            <option value="deepseek-v4-flash">deepseek-v4-flash (兼容, 自动路由到V4.1)</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro (9月14日下线)</option>
+          </optgroup>
+          <optgroup label="OpenCode 免费模型 (仅客户端可用)">
+            <option value="big-pickle">big-pickle</option>
+            <option value="mimo-v2.5-free">mimo-v2.5-free</option>
+          </optgroup>
+          <optgroup label="其他">
+            <option value="custom">自定义输入</option>
+          </optgroup>
+        </select>
+        <input type="text" id="settingModelCustom" placeholder="自定义模型名称" style="display:none; margin-top:6px;">
+      </div>
+      <div class="form-group">
+        <label>每篇目标生词数</label>
+        <input type="number" id="settingNewWords" min="3" max="30" value="10">
+        <div class="hint">前5篇为校准期，系统自动调整</div>
+      </div>
+      <div class="form-group">
+        <button class="toolbar-btn" id="testApiBtn" style="width:100%;">测试连接</button>
+        <div class="test-result" id="testResult"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="toolbar-btn" id="settingsCancel">取消</button>
+        <button class="toolbar-btn primary" id="settingsSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 专注模式触发区域 -->
+  <div class="focus-top-trigger" id="focusTopTrigger"></div>
+  <div class="focus-left-trigger" id="focusLeftTrigger"></div>
+  <div class="focus-hint" id="focusHint">Esc 退出专注 · Space 暂停计时 · F 切换专注</div>
+
+  <!-- 水纹扩散引导效果 -->
+  <div class="ripple-container" id="rippleContainer"></div>
+
+  <!-- 右侧查词历史滑出面板 -->
+  <div class="right-panel-trigger" id="rightPanelTrigger"></div>
+  <div class="right-panel" id="rightPanel">
+    <div class="right-panel-header">
+      <span>查词历史</span>
+      <span class="count" id="lookupCount">0</span>
+    </div>
+    <div class="right-panel-body" id="lookupHistoryList">
+      <div class="right-panel-empty">还没有查词记录<br>选中文字即可查词</div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js?v=37"></script>
+</body>
+</html>
