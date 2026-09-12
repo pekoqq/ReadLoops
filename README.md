@@ -62,6 +62,28 @@ pip install -e .                 # 以可编辑模式安装
 readloops                        # 启动
 ```
 
+### 方式三：Docker（推荐用于服务器 / 长期运行）
+
+```bash
+docker compose up -d
+```
+
+或不用 compose：
+
+```bash
+docker build -t readloops .
+docker run -d --name readloops \
+  -p 127.0.0.1:8000:8000 \
+  -v readloops-data:/data \
+  --restart unless-stopped \
+  readloops
+```
+
+- **三大系统命令完全一致**，不依赖本机 Python 环境
+- 数据库持久化在 `readloops-data` 卷中，容器重建不丢数据
+- 默认只绑定本机（安全）。要让局域网 / 其他设备访问，把 `docker-compose.yml` 的端口改成 `"8000:8000"`
+- 查看日志：`docker logs -f readloops`
+
 ### 命令行说明
 
 | 命令 | 作用 |
@@ -127,6 +149,32 @@ readloops                        # 启动
 用 `readloops doctor` 可随时查看当前实际路径。想自定义就设 `READLOOPS_DATA_DIR`。
 
 > 数据库**不会**写入 Python 安装目录（site-packages），升级或卸载包不会影响你的数据。
+
+## 在其他设备上访问
+
+默认只绑定 `127.0.0.1`——即只有本机能访问。要让手机或别的电脑也能用：
+
+### 同一局域网
+
+```bash
+readloops serve --host 0.0.0.0
+```
+
+Docker 用户把 `docker-compose.yml` 的端口改成 `"8000:8000"`。然后访问 `http://<电脑局域网IP>:8000`。
+
+> ⚠️ 局域网内任何人都能访问，且**没有密码保护**。仅在可信网络下这样做。
+
+### 通过 Tailscale（可在外网使用）
+
+若你的设备都在同一 Tailscale 网络中：
+
+1. 在常开的机器上跑服务，监听 `0.0.0.0`
+2. 手机安装 Tailscale 并登录同一账号
+3. 访问 `http://<机器的Tailscale IP>:8000`
+
+只有你自己的设备能访问，且不受网络位置限制。
+
+> 说明：界面目前未做手机小屏的专项适配，能打开使用但体验一般；响应式优化在路线图中。
 
 ## 项目结构
 

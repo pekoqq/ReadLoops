@@ -1,0 +1,17 @@
+services:
+  readloops:
+    build: .
+    image: readloops:latest
+    container_name: readloops
+    ports:
+      # 仅本机访问（默认，最安全）
+      - "127.0.0.1:8000:8000"
+      # 想让局域网内其他设备访问，注释上面一行、改用下面一行：
+      # - "8000:8000"
+    volumes:
+      # 数据库持久化：容器删了数据也在
+      - readloops-data:/data
+    restart: unless-stopped
+
+volumes:
+  readloops-data:

@@ -70,3 +70,32 @@ jobs:
           readloops init
           test -f "$READLOOPS_DATA_DIR/yuedu.db" && echo "数据库创建成功"
           readloops doctor || true
+
+  docker:
+    name: Docker 镜像构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: readloops:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 启动容器并验证
+        run: |
+          docker run -d --name rl -p 127.0.0.1:8000:8000 readloops:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/health > /dev/null; then
+              echo "健康检查通过"; exit 0
+            fi
+            sleep 2
+          done
+          echo "健康检查超时"; docker logs rl; exit 1

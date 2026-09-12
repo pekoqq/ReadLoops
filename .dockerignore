@@ -1,0 +1,33 @@
+# 构建镜像时排除的内容（减小体积、避免把个人数据打进镜像）
+
+.git
+.github
+.gitignore
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+dist
+build
+*.egg-info
+
+# 数据与语料：绝不打进镜像
+data
+backups
+logs
+corpus
+语料库
+*.db
+*.db-wal
+*.db-shm
+
+# 开发用，运行镜像不需要
+tests
+docs
+tools
+skills
+.pre-commit-config.yaml
+requirements-dev.txt
