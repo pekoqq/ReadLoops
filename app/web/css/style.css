@@ -1990,7 +1990,10 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
 
-/* ========== 应用弹窗（替换原生 confirm/alert） ========== */
+/* ========== 应用弹窗（替换原生 confirm/alert） ==========
+   注意：JS 是直接 append 元素，不会添加 .show 类，
+   因此入场效果必须用 @keyframes 动画，不能用 opacity:0 + 类切换，
+   否则弹窗会永远不可见。 */
 .app-dialog-overlay {
   position: fixed;
   inset: 0;
@@ -2000,10 +2003,8 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  animation: app-dialog-fade 0.18s ease;
 }
-.app-dialog-overlay.show { opacity: 1; }
 
 .app-dialog {
   background: var(--glass-strong);
@@ -2013,23 +2014,16 @@ body {
   max-width: 360px;
   width: 90%;
   box-shadow: var(--glass-shadow);
-  transform: scale(0.95);
-  transition: transform 0.2s ease;
-}
-.app-dialog-overlay.show .app-dialog { transform: scale(1); }
-
-.app-dialog-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 12px;
+  animation: app-dialog-pop 0.18s ease;
 }
 
-.app-dialog-msg {
+.app-dialog-message {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--text);
   line-height: 1.6;
-  margin-bottom: 24px;
+  margin-bottom: 22px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .app-dialog-actions {
@@ -2038,32 +2032,18 @@ body {
   justify-content: flex-end;
 }
 
-.app-dialog-actions button {
+/* 按钮复用 .toolbar-btn / .toolbar-btn.danger / .toolbar-btn.primary 的既有样式 */
+.app-dialog-actions .toolbar-btn {
   padding: 8px 18px;
-  border-radius: 8px;
-  border: 1px solid var(--glass-border-strong);
-  background: var(--glass);
-  color: var(--text);
   font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s ease;
 }
-.app-dialog-actions button:hover {
-  background: var(--highlight);
+
+@keyframes app-dialog-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-.app-dialog-actions .btn-danger {
-  background: rgba(220, 60, 60, 0.18);
-  border-color: rgba(220, 60, 60, 0.35);
-  color: #ff8a8a;
-}
-.app-dialog-actions .btn-danger:hover {
-  background: rgba(220, 60, 60, 0.28);
-}
-.app-dialog-actions .btn-primary {
-  background: var(--text);
-  color: var(--bg);
-  border-color: var(--text);
-}
-.app-dialog-actions .btn-primary:hover {
-  background: var(--accent-hover);
+
+@keyframes app-dialog-pop {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
 }

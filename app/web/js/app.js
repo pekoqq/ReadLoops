@@ -852,6 +852,10 @@ function switchPage(renderFn) {
     } else {
       reader.classList.remove('wide-view');
     }
+    // 专注模式服务于「沉浸阅读」，只在阅读页显示入口；
+    // 生词本 / 历史文章 / 测试 / 统计等页面隐藏，避免误触无意义的全屏。
+    const focusBtn = $('#focusBtn');
+    if (focusBtn) focusBtn.style.display = (activeView === 'reader') ? '' : 'none';
     // 3. 淡入
     reader.classList.remove('page-fading');
     reader.classList.remove('page-enter');
