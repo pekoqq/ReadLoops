@@ -651,6 +651,16 @@ async function restoreHighlights(articleId) {
 }
 function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+/**
+ * 给成组出现的元素设置错峰延迟，避免它们「一起蹦出来」。
+ * 延迟随序号递增，但有上限，防止长列表最后一项等太久。
+ */
+function staggerIn(selector, step = 0.035, max = 0.36) {
+  $$(selector).forEach((el, i) => {
+    el.style.animationDelay = Math.min(i * step, max) + 's';
+  });
+}
+
 // 划词查词
 const lookupPanel = $('#lookupPanel');
 let currentSelection = '';
@@ -966,6 +976,9 @@ async function loadArticlesList() {
       </div>`
     ).join('')) + '</div>';
 
+  // 错峰浮现，避免几十条一起涌上来
+  staggerIn('.article-item');
+
   // 点击文章打开
   $$('.article-item-content').forEach(item => {
     item.addEventListener('click', async () => {
@@ -1160,6 +1173,9 @@ async function loadVocab() {
         </div>
       </div>`
     ).join('')) + '</div>';
+
+  // 错峰浮现
+  staggerIn('.vocab-item');
 
   // 返回阅读
   const backBtn = $('#backToReaderBtn');

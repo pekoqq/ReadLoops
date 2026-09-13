@@ -69,6 +69,13 @@
   /* 统一 hover 反馈：玻璃加深 + 微上浮（不再出现「整体反色」） */
   --btn-hover-bg: rgba(253,252,252,0.10);
   --btn-hover-shadow: 0 6px 18px rgba(0,0,0,0.22);
+
+  /* ===== 入场动画节奏 =====
+     统一时长与位移，避免各处快慢不一；
+     成组的元素（卡片 / 列表）用错峰延迟依次浮现，而不是一起蹦出来。 */
+  --enter-dur: 0.55s;
+  --enter-shift: 10px;
+  --enter-stagger: 0.04s;
 }
 
 /* ===== 全局动画基础 ===== */
@@ -895,16 +902,17 @@ body.theme-transition *::after {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeInUp var(--enter-dur) var(--ease-out) both;
 }
-.stat-card:nth-child(1) { animation-delay: 0.05s; }
-.stat-card:nth-child(2) { animation-delay: 0.1s; }
-.stat-card:nth-child(3) { animation-delay: 0.15s; }
-.stat-card:nth-child(4) { animation-delay: 0.2s; }
-.stat-card:nth-child(5) { animation-delay: 0.25s; }
-.stat-card:nth-child(6) { animation-delay: 0.3s; }
-.stat-card:nth-child(7) { animation-delay: 0.35s; }
-.stat-card:nth-child(8) { animation-delay: 0.4s; }
+/* 依次浮现（错峰），而不是八个一起蹦出来 */
+.stat-card:nth-child(1) { animation-delay: calc(var(--enter-stagger) * 1); }
+.stat-card:nth-child(2) { animation-delay: calc(var(--enter-stagger) * 2); }
+.stat-card:nth-child(3) { animation-delay: calc(var(--enter-stagger) * 3); }
+.stat-card:nth-child(4) { animation-delay: calc(var(--enter-stagger) * 4); }
+.stat-card:nth-child(5) { animation-delay: calc(var(--enter-stagger) * 5); }
+.stat-card:nth-child(6) { animation-delay: calc(var(--enter-stagger) * 6); }
+.stat-card:nth-child(7) { animation-delay: calc(var(--enter-stagger) * 7); }
+.stat-card:nth-child(8) { animation-delay: calc(var(--enter-stagger) * 8); }
 .stat-card:hover {
   border-color: var(--glass-border-strong);
   transform: translateY(-3px) scale(1.02);
@@ -1008,6 +1016,8 @@ body.theme-transition *::after {
 .heatmap-container {
   overflow-x: auto;
   padding: 10px 0;
+  /* 整块淡入，代替 188 个格子同时缩放的「炸开」 */
+  animation: fadeIn var(--enter-dur) var(--ease-out) both;
 }
 .heatmap {
   display: grid;
@@ -1030,7 +1040,8 @@ body.theme-transition *::after {
               box-shadow 0.2s var(--ease-out);
   cursor: pointer;
   position: relative;
-  animation: scaleIn 0.4s var(--ease-out) both;
+  /* 刻意不加逐格入场动画：188 个格子同时缩放会「炸开」，
+     改成整块淡入（见 .heatmap-container），观感干净得多。 */
 }
 /* 有数据的日子：实心填充，去掉描边 */
 .heatmap-cell.level-1,
@@ -1123,7 +1134,8 @@ body.theme-transition *::after {
   overflow: hidden;
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  animation: articleItemIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  /* 错峰延迟由 JS 按序号设置（见 loadArticlesList），避免几十条一起涌上来 */
+  animation: articleItemIn var(--enter-dur) var(--ease-out) both;
 }
 @keyframes articleItemIn {
   from { opacity: 0; transform: translateY(14px) scale(0.98); }
@@ -1279,7 +1291,7 @@ body.theme-transition *::after {
   overflow: hidden;
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  animation: vocabItemIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: vocabItemIn var(--enter-dur) var(--ease-out) both;
 }
 @keyframes vocabItemIn {
   from { opacity: 0; transform: translateY(12px) scale(0.98); }
