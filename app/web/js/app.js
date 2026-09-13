@@ -655,7 +655,7 @@ function escapeHtml(s) { const d = document.createElement('div'); d.textContent 
  * 给成组出现的元素设置错峰延迟，避免它们「一起蹦出来」。
  * 延迟随序号递增，但有上限，防止长列表最后一项等太久。
  */
-function staggerIn(selector, step = 0.035, max = 0.36) {
+function staggerIn(selector, step = 0.045, max = 0.45) {
   $$(selector).forEach((el, i) => {
     el.style.animationDelay = Math.min(i * step, max) + 's';
   });
@@ -1079,16 +1079,6 @@ function renderArticleDetail(details) {
       </div>` : ''}
     </div>
   `;
-
-  // 文章列表错落入场动画（前15个）
-  $$('.article-item').forEach((item, i) => {
-    if (i < 15) {
-      item.style.animationDelay = `${i * 0.05}s`;
-    } else {
-      item.style.animation = 'none';
-      item.style.opacity = '1';
-    }
-  });
 }
 
 let selectedWordIds = new Set();
@@ -1285,15 +1275,6 @@ async function loadVocab() {
     });
   }
 
-  // 生词本词条错落入场动画（前20个，避免大量动画卡顿）
-  $$('.vocab-item').forEach((item, i) => {
-    if (i < 20) {
-      item.style.animationDelay = `${i * 0.04}s`;
-    } else {
-      item.style.animation = 'none';
-      item.style.opacity = '1';
-    }
-  });
 }
 
 function updateVocabToolbar() {
@@ -1584,6 +1565,11 @@ function renderTestHome() {
   });
 
   $('#startTestBtn').addEventListener('click', startTest);
+
+  // 分区与选项错峰浮现，和全站节奏保持一致
+  staggerIn('.srs-review-banner');
+  staggerIn('.test-type-card', 0.04);
+  staggerIn('.test-option-btn', 0.03);
 }
 
 async function startSrsReview() {
@@ -1683,6 +1669,9 @@ function renderTestQuestion() {
         `<button class="test-option" data-index="${i}">${String.fromCharCode(65 + i)}. ${escapeHtml(opt)}</button>`
       ).join('')}
     </div>`;
+  // 选项错峰浮现
+  staggerIn('.test-option', 0.035);
+
   $$('.test-option').forEach(btn => {
     btn.addEventListener('click', () => {
       if (testAnswered) return;

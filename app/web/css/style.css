@@ -1710,6 +1710,15 @@ body.theme-transition *::after {
   font-size: 15px;
   margin-top: 8px;
 }
+/* 测试页：与全站统一的入场节奏（错峰延迟由 staggerIn 设置） */
+.srs-review-banner,
+.test-type-card,
+.test-option-btn,
+.test-start-btn,
+.test-option,
+.test-result-card {
+  animation: enterFade var(--enter-dur) var(--ease-silk) both;
+}
 
 /* 测试结果 */
 .test-meta {
