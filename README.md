@@ -49,7 +49,7 @@ readloops          # 启动，并自动打开浏览器
 ### 方式二：从源码安装
 
 ```bash
-git clone <repo-url> && cd readloops
+git clone https://github.com/pekoqq/ReadLoops.git && cd ReadLoops
 
 # 创建虚拟环境
 python3 -m venv .venv

@@ -5,7 +5,7 @@
 ## 1. 环境搭建
 
 ```bash
-git clone <repo-url> && cd readloops
+git clone https://github.com/pekoqq/ReadLoops.git && cd ReadLoops
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 pre-commit install          # 安装提交前钩子
