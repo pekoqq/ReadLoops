@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.services.ai import lookup_word
+from app.services.ai import lookup_word, translate_sentence
 
 router = APIRouter(prefix="/api/words", tags=["words"])
 
@@ -32,6 +32,21 @@ async def lookup(word: str):
         "in_vocab": result.id is not None,
         "word_id": result.id,
     }
+
+
+class TranslateRequest(BaseModel):
+    text: str
+
+
+@router.post("/translate")
+async def translate(req: TranslateRequest):
+    """翻译句子 / 短语。
+
+    划词选中多个单词时走这里 —— 词典查不到整句，
+    以前会直接显示「查询失败」。
+    """
+    translation = translate_sentence(req.text)
+    return {"text": req.text, "translation": translation, "ok": bool(translation)}
 
 
 @router.post("/add")

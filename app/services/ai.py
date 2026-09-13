@@ -551,3 +551,21 @@ Return ONLY valid JSON:
     except Exception as e:
         print(f"查词失败: {e}")
         return Word(id=None, text=word, meaning="查询失败", phonetic="")
+
+
+def translate_sentence(text):
+    """翻译英文句子 / 短语为中文。
+
+    划词选中多个单词时走这里，而不是查词典
+    （词典查不到整句，之前会直接显示「查询失败」）。
+    """
+    prompt = f"""Translate the following English text into natural, fluent Chinese.
+Return ONLY the translation itself — no explanation, no quotes, no pinyin.
+
+Text: {text}"""
+    try:
+        result = _chat([{"role": "user", "content": prompt}], max_tokens=500, temperature=0.3)
+        return (result or "").strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"翻译失败: {e}")
+        return ""

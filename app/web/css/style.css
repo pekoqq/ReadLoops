@@ -305,12 +305,22 @@ body::before {
 }
 
 .sidebar-header {
+  display: block;
   padding: 18px 18px 12px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border-bottom: none;
+  /* 作为跳转链接：保持原有视觉，只加一点 hover 反馈 */
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.2s var(--ease-out), letter-spacing 0.25s var(--ease-out);
+}
+.sidebar-header:hover {
+  opacity: 0.72;
+  letter-spacing: 0.11em;
 }
 .sidebar-nav { padding: 8px 10px; flex: 1; overflow-y: auto; }
 .nav-section {
@@ -650,6 +660,9 @@ body::before {
 .lookup-panel .phonetic { font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; }
 .lookup-panel .meaning { font-size: 13px; line-height: 1.5; margin-bottom: 10px; color: var(--text); }
 .lookup-panel .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 句子翻译模式：整句不该进生词本，隐藏该按钮 */
+.lookup-panel.sentence-mode #lpAdd { display: none; }
+.lookup-panel.sentence-mode { max-width: 380px; }
 .lookup-panel .action-btn {
   height: var(--btn-h-sm);
   padding: var(--btn-pad-sm);

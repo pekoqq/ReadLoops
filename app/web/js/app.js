@@ -666,6 +666,21 @@ async function showLookupPanel(x, y, word) {
   $('#lpPhonetic').textContent = '';
   $('#lpMeaning').textContent = '查询中...';
   if (!timerRunning && currentArticle) startTimer();
+
+  // 选中多个单词 → 翻译整句；单个单词 → 查词典
+  if (/\s/.test(word.trim())) {
+    lookupPanel.classList.add('sentence-mode');
+    lookupPanel.dataset.wordId = '';
+    try {
+      const res = await api.post('/api/words/translate', { text: word });
+      $('#lpMeaning').textContent = res.translation || '翻译失败';
+    } catch (err) {
+      $('#lpMeaning').textContent = '翻译失败';
+    }
+    return;
+  }
+  lookupPanel.classList.remove('sentence-mode');
+
   try {
     const result = await api.get(`/api/words/lookup/${encodeURIComponent(word)}`);
     $('#lpPhonetic').textContent = result.phonetic || '';
