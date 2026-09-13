@@ -915,8 +915,8 @@ function switchPage(renderFn) {
     setTimeout(() => {
       reader.classList.remove('page-enter');
       isSwitching = false;
-    }, 320);
-  }, 180);
+    }, 460);
+  }, 160);
 }
 
 $$('.nav-item').forEach(item => {
