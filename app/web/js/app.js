@@ -893,6 +893,9 @@ function switchPage(renderFn) {
     // 生词本 / 历史文章 / 测试 / 统计等页面隐藏，避免误触无意义的全屏。
     const focusBtn = $('#focusBtn');
     if (focusBtn) focusBtn.style.display = (activeView === 'reader') ? '' : 'none';
+    // 底部计时栏也只属于阅读页 —— 出现在统计 / 生词本里很突兀。
+    const timerBar = document.querySelector('.timer-bar');
+    if (timerBar) timerBar.style.display = (activeView === 'reader') ? '' : 'none';
     // 3. 淡入
     reader.classList.remove('page-fading');
     reader.classList.remove('page-enter');

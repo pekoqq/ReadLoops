@@ -1787,24 +1787,24 @@ body.theme-transition *::after {
 }
 .right-panel-trigger::before {
   content: '';
-  width: 3px;
-  height: 88px;
-  background: var(--text-tertiary);
-  border-radius: 2px 0 0 2px;
-  opacity: 0.3;
+  width: 4px;
+  height: 96px;
+  background: var(--text-secondary);
+  border-radius: 3px 0 0 3px;
+  opacity: 0.4;
   transition: opacity 0.2s var(--ease-out), width 0.2s var(--ease-out),
-              background 0.2s var(--ease-out);
-  /* 极缓的呼吸：让用户注意到右边藏着一个抽屉，又不至于干扰阅读 */
-  animation: hint-breathe 4.2s ease-in-out infinite;
+              height 0.2s var(--ease-out), background 0.2s var(--ease-out);
+  /* 呼吸：让用户注意到右边藏着一个抽屉，又不至于干扰阅读 */
+  animation: hint-breathe 3.6s ease-in-out infinite;
 }
 @keyframes hint-breathe {
-  0%, 100% { opacity: 0.22; }
-  50%      { opacity: 0.48; }
+  0%, 100% { opacity: 0.28; }
+  50%      { opacity: 0.72; }
 }
 .right-panel-trigger:hover::before {
-  opacity: 0.9;
-  width: 5px;
-  height: 110px;
+  opacity: 1;
+  width: 7px;
+  height: 130px;
   background: var(--text);
   animation: none;
 }
@@ -2189,11 +2189,20 @@ body.theme-transition *::after {
   right: 0;
   height: 2px;
   background: linear-gradient(to bottom, var(--accent), transparent);
-  opacity: 0;
-  transition: opacity 0.3s ease;
+  /* 常驻呼吸：专注模式把工具栏藏起来了，必须让用户知道
+     「鼠标移到顶部能把工具栏唤回来」，否则会以为功能没了。 */
+  opacity: 0.3;
+  animation: hint-breathe-top 3.6s ease-in-out infinite;
+  transition: opacity 0.3s ease, height 0.3s ease;
+}
+@keyframes hint-breathe-top {
+  0%, 100% { opacity: 0.18; }
+  50%      { opacity: 0.55; }
 }
 .app.focus-mode .focus-top-trigger:hover::after {
-  opacity: 0.6;
+  opacity: 0.95;
+  height: 3px;
+  animation: none;
 }
 .focus-left-trigger {
   position: fixed;
