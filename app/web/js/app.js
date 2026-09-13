@@ -881,7 +881,7 @@ $('#settingsSave').addEventListener('click', async () => {
 // 导航
 // 页面切换：淡出 → 替换内容 → 淡入
 let isSwitching = false;
-function switchPage(renderFn) {
+async function switchPage(renderFn) {
   if (isSwitching) return;
   isSwitching = true;
   // 切换页面时停止打字机
@@ -889,9 +889,16 @@ function switchPage(renderFn) {
   const reader = $('#reader');
   // 1. 淡出（只用opacity，减少重绘）
   reader.classList.add('page-fading');
-  setTimeout(() => {
-    // 2. 替换内容
-    renderFn();
+  setTimeout(async () => {
+    // 2. 替换内容 —— 必须 await！
+    //    renderFn 里多是异步函数（loadStats / loadVocab / loadArticlesList…），
+    //    它们要先拿到接口数据才写 innerHTML。不等它完成就淡入的话，
+    //    会先把「上一页的旧内容」淡进来，等数据回来再被换掉 —— 这就是残影。
+    try {
+      await renderFn();
+    } catch (err) {
+      console.error('页面渲染失败:', err);
+    }
     // 根据当前视图决定是否宽布局
     const activeView = document.querySelector('.nav-item.active')?.dataset.view;
     if (activeView === 'stats' || activeView === 'articles' || activeView === 'vocab') {
@@ -915,7 +922,7 @@ function switchPage(renderFn) {
     setTimeout(() => {
       reader.classList.remove('page-enter');
       isSwitching = false;
-    }, 460);
+    }, 500);
   }, 160);
 }
 
