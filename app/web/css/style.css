@@ -40,6 +40,24 @@
   --transition-ease-out: 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   --mono: "Berkeley Mono", "SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace;
   --ripple-color: rgba(255,255,255,0.06);
+
+  /* ===== 按钮设计系统 =====
+     全站按钮共用这套 token。之前每个按钮各写各的，
+     导致圆角 4/8/20px 三套、hover 反馈四五种，视觉语言不统一。 */
+  --btn-h: 32px;           /* 标准高度 */
+  --btn-h-sm: 26px;        /* 小号（计时、下拉） */
+  --btn-radius: 999px;     /* 胶囊：文字按钮 */
+  --btn-radius-sq: 9px;    /* 方形：图标按钮、输入框 */
+  --btn-pad: 0 14px;
+  --btn-pad-sm: 0 10px;
+
+  /* 统一缓动：位移用弹簧，颜色用 ease-out */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* 统一 hover 反馈：玻璃加深 + 微上浮（不再出现「整体反色」） */
+  --btn-hover-bg: rgba(253,252,252,0.10);
+  --btn-hover-shadow: 0 6px 18px rgba(0,0,0,0.22);
 }
 
 /* ===== 全局动画基础 ===== */
@@ -325,14 +343,25 @@ body {
 }
 .sidebar-footer select, .sidebar-footer input {
   width: 100%;
-  padding: 6px 8px;
-  border-radius: var(--radius);
+  height: var(--btn-h-sm);
+  padding: 0 8px;
+  border-radius: var(--btn-radius-sq);
   border: 1px solid var(--glass-border-strong);
-  background: var(--bg-reader);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text);
   font-size: 12px;
   font-family: var(--mono);
   outline: none;
+  transition: background 0.2s var(--ease-out), border-color 0.2s var(--ease-out);
+}
+.sidebar-footer select:hover, .sidebar-footer input:hover {
+  background: var(--glass-strong);
+}
+.sidebar-footer select:focus, .sidebar-footer input:focus {
+  border-color: var(--text-tertiary);
+  background: var(--glass-strong);
 }
 
 /* 主区域 */
@@ -350,63 +379,98 @@ body {
   flex-shrink: 0;
   z-index: 5;
 }
+/* 按钮基类：全站文字按钮统一长这样（胶囊 + 玻璃 + 微上浮反馈） */
 .toolbar-btn {
-  padding: 8px 16px;
-  border-radius: 20px;
-  border: 1px solid var(--glass-border);
+  height: var(--btn-h);
+  padding: var(--btn-pad);
+  border-radius: var(--btn-radius);
+  border: 1px solid var(--glass-border-strong);
   background: var(--glass);
-  backdrop-filter: var(--glass-liquid);
-  -webkit-backdrop-filter: var(--glass-liquid);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
   font-family: var(--mono);
-  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   white-space: nowrap;
+  user-select: none;
   position: relative;
   overflow: hidden;
   box-shadow: var(--glass-inner-shadow);
+  transition: background 0.2s var(--ease-out),
+              border-color 0.2s var(--ease-out),
+              color 0.2s var(--ease-out),
+              box-shadow 0.2s var(--ease-out),
+              transform 0.18s var(--ease-spring);
 }
+/* 统一的扫光高光：所有按钮一致，不再只有某一个有 */
 .toolbar-btn::before {
   content: '';
   position: absolute;
   top: 0; left: -100%;
   width: 100%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-  transition: left 0.5s ease;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.10), transparent);
+  transition: left 0.55s var(--ease-out);
+  pointer-events: none;
 }
-.toolbar-btn:hover::before {
-  left: 100%;
-}
+.toolbar-btn:hover::before { left: 100%; }
 .toolbar-btn:hover {
   background: var(--glass-strong);
   border-color: var(--glass-border-strong);
   color: var(--text);
-  transform: translateY(-2px);
-  box-shadow: var(--glass-inner-shadow), 0 6px 20px rgba(0,0,0,0.2);
+  transform: translateY(-1px);
+  box-shadow: var(--glass-inner-shadow), var(--btn-hover-shadow);
 }
 .toolbar-btn:active {
-  transform: translateY(0) scale(0.96);
-  transition: all 0.1s ease;
+  transform: translateY(0) scale(0.97);
+  transition-duration: 0.08s;
 }
+/* 主操作：实心 */
 .toolbar-btn.primary {
   background: var(--text);
   color: var(--bg);
   border-color: var(--text);
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }
 .toolbar-btn.primary:hover {
-  opacity: 0.92;
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+  opacity: 0.94;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.28);
 }
 .toolbar-btn.primary:active {
-  transform: translateY(0) scale(0.96);
+  transform: translateY(0) scale(0.97);
 }
-.toolbar-btn.icon { padding: 6px 10px; min-width: 36px; font-size: 14px; }
-.toolbar-btn.large { padding: 8px 16px; font-size: 13px; min-width: 40px; }
+.toolbar-btn.primary::before { display: none; }
+/* 危险操作：红色系，与普通按钮同一套反馈语言 */
+.toolbar-btn.danger {
+  color: #ff7a7a;
+  border-color: rgba(255,107,107,0.42);
+}
+.toolbar-btn.danger:hover {
+  background: rgba(255,107,107,0.14);
+  border-color: rgba(255,107,107,0.62);
+  color: #ff9090;
+  transform: translateY(-1px);
+}
+/* 图标按钮：正方形 */
+.toolbar-btn.icon {
+  width: var(--btn-h);
+  padding: 0;
+  font-size: 14px;
+}
+.toolbar-btn.large {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 13px;
+}
 .toolbar-spacer { flex: 1; }
 
 /* 阅读区 */
@@ -493,19 +557,38 @@ body {
   color: var(--text);
   font-weight: 600;
 }
+/* 计时按钮：小号，与全站按钮同一套反馈语言（不再整体反色） */
 .timer-btn {
-  padding: 4px 12px;
-  border-radius: var(--radius);
+  height: var(--btn-h-sm);
+  padding: var(--btn-pad-sm);
+  border-radius: var(--btn-radius);
   border: 1px solid var(--glass-border-strong);
-  background: transparent;
-  color: var(--text);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 11px;
   font-weight: 500;
   font-family: var(--mono);
-  transition: all var(--transition);
+  box-shadow: var(--glass-inner-shadow);
+  transition: background 0.2s var(--ease-out),
+              border-color 0.2s var(--ease-out),
+              color 0.2s var(--ease-out),
+              box-shadow 0.2s var(--ease-out),
+              transform 0.18s var(--ease-spring);
 }
-.timer-btn:hover { background: var(--text); color: var(--bg); }
+.timer-btn:hover {
+  background: var(--glass-strong);
+  border-color: var(--glass-border-strong);
+  color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: var(--glass-inner-shadow), var(--btn-hover-shadow);
+}
+.timer-btn:active {
+  transform: translateY(0) scale(0.97);
+  transition-duration: 0.08s;
+}
 
 /* 划词面板 */
 .lookup-panel {
@@ -537,18 +620,36 @@ body {
 .lookup-panel .meaning { font-size: 13px; line-height: 1.5; margin-bottom: 10px; color: var(--text); }
 .lookup-panel .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .lookup-panel .action-btn {
-  padding: 4px 10px;
-  border-radius: var(--radius);
+  height: var(--btn-h-sm);
+  padding: var(--btn-pad-sm);
+  border-radius: var(--btn-radius);
   border: 1px solid var(--glass-border-strong);
-  background: transparent;
-  color: var(--text);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 11px;
   font-weight: 500;
   font-family: var(--mono);
-  transition: all var(--transition);
+  box-shadow: var(--glass-inner-shadow);
+  transition: background 0.2s var(--ease-out),
+              border-color 0.2s var(--ease-out),
+              color 0.2s var(--ease-out),
+              box-shadow 0.2s var(--ease-out),
+              transform 0.18s var(--ease-spring);
 }
-.lookup-panel .action-btn:hover { background: var(--text); color: var(--bg); }
+.lookup-panel .action-btn:hover {
+  background: var(--glass-strong);
+  border-color: var(--glass-border-strong);
+  color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: var(--glass-inner-shadow), var(--btn-hover-shadow);
+}
+.lookup-panel .action-btn:active {
+  transform: translateY(0) scale(0.97);
+  transition-duration: 0.08s;
+}
 
 /* 设置模态框 */
 .modal-overlay {
@@ -617,7 +718,9 @@ body {
 }
 
 .modal {
-  background: var(--bg-reader);
+  background: var(--glass-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
   border: 1px solid var(--glass-border-strong);
   border-radius: var(--radius-lg);
   padding: 24px;
@@ -626,6 +729,7 @@ body {
   max-height: 80vh;
   overflow-y: auto;
   font-family: var(--mono);
+  box-shadow: var(--glass-shadow);
 }
 .modal h2 {
   font-size: 16px;
@@ -950,26 +1054,36 @@ body {
 .article-item .title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .article-item .meta { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
 
+/* 图标按钮 · 危险：生词本与文章列表共用同一套
+   （此前两者尺寸 22/24、圆角 8/4、有无边框、hover 行为全不一致） */
 .article-delete-btn {
   width: 24px;
   height: 24px;
-  border: none;
+  padding: 0;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-tertiary);
-  font-size: 16px;
+  font-size: 15px;
+  line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--btn-radius-sq);
   display: flex;
   align-items: center;
   justify-content: center;
   margin-left: 8px;
   flex-shrink: 0;
-  transition: all var(--transition);
+  transition: background 0.18s var(--ease-out),
+              border-color 0.18s var(--ease-out),
+              color 0.18s var(--ease-out),
+              transform 0.18s var(--ease-spring);
 }
 .article-delete-btn:hover {
-  background: rgba(255, 107, 107, 0.15);
-  color: #ff6b6b;
+  background: rgba(255,107,107,0.14);
+  border-color: rgba(255,107,107,0.40);
+  color: #ff7a7a;
+  transform: scale(1.06);
 }
+.article-delete-btn:active { transform: scale(0.94); }
 
 /* 文章详情浮层 */
 .article-detail-popup {
@@ -1166,25 +1280,32 @@ body {
 }
 .vocab-item-main { cursor: pointer; }
 .vocab-delete-btn {
-  background: none;
-  border: 1px solid var(--glass-border-strong);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
   color: var(--text-tertiary);
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius);
+  border-radius: var(--btn-radius-sq);
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition);
   flex-shrink: 0;
+  transition: background 0.18s var(--ease-out),
+              border-color 0.18s var(--ease-out),
+              color 0.18s var(--ease-out),
+              transform 0.18s var(--ease-spring);
 }
 .vocab-delete-btn:hover {
-  color: #ff6b6b;
-  border-color: #ff6b6b;
+  background: rgba(255,107,107,0.14);
+  border-color: rgba(255,107,107,0.40);
+  color: #ff7a7a;
+  transform: scale(1.06);
 }
+.vocab-delete-btn:active { transform: scale(0.94); }
 .vocab-detail {
   margin-top: 10px;
   padding: 12px;
@@ -1312,13 +1433,19 @@ body {
   font-family: var(--mono);
   cursor: pointer;
   text-align: left;
-  transition: all var(--transition-fast);
+  box-shadow: var(--glass-inner-shadow);
+  transition: background 0.2s var(--ease-out),
+              border-color 0.2s var(--ease-out),
+              box-shadow 0.2s var(--ease-out),
+              transform 0.18s var(--ease-spring);
 }
 .test-option:hover {
-  border-color: var(--text);
-  transform: translateX(4px);
+  background: var(--glass-strong);
+  border-color: var(--glass-border-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--glass-inner-shadow), var(--btn-hover-shadow);
 }
-.test-option:active { transform: scale(0.98); }
+.test-option:active { transform: translateY(0) scale(0.98); }
 .test-option.correct {
   border-color: #4ade80;
   background: rgba(74, 222, 128, 0.1);
