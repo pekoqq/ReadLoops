@@ -70,12 +70,15 @@
   --btn-hover-bg: rgba(253,252,252,0.10);
   --btn-hover-shadow: 0 6px 18px rgba(0,0,0,0.22);
 
-  /* ===== 入场动画节奏 =====
-     统一时长与位移，避免各处快慢不一；
-     成组的元素（卡片 / 列表）用错峰延迟依次浮现，而不是一起蹦出来。 */
-  --enter-dur: 0.55s;
-  --enter-shift: 10px;
-  --enter-stagger: 0.04s;
+  /* ===== 动效节奏 =====
+     页面切换：容器只做淡入淡出，绝不位移 —— 容器一移，整块内容就「跳」。
+     内容入场：小位移（≤6px）+ 错峰，既有「浮现」的层次感，
+     又不会像被推出来。之前用 12~14px 还带 scale，位移过大，看着就是抖。 */
+  --page-out: 0.18s;
+  --page-in: 0.32s;
+  --enter-dur: 0.42s;
+  --enter-shift: 6px;
+  --enter-stagger: 0.03s;
 }
 
 /* ===== 全局动画基础 ===== */
@@ -100,8 +103,8 @@
 
 /* 元素入场动画 */
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(var(--enter-shift)); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -1138,8 +1141,8 @@ body.theme-transition *::after {
   animation: articleItemIn var(--enter-dur) var(--ease-out) both;
 }
 @keyframes articleItemIn {
-  from { opacity: 0; transform: translateY(14px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(var(--enter-shift)); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .article-item::before {
   content: '';
@@ -1294,8 +1297,8 @@ body.theme-transition *::after {
   animation: vocabItemIn var(--enter-dur) var(--ease-out) both;
 }
 @keyframes vocabItemIn {
-  from { opacity: 0; transform: translateY(12px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(var(--enter-shift)); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .vocab-item::before {
   content: '';
@@ -2017,24 +2020,17 @@ body.theme-transition *::after {
               transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
   will-change: opacity, transform;
 }
+/* 容器切换只做淡入淡出，绝不位移 —— 容器一移，整块内容就「跳」。 */
 #reader.page-fading {
   opacity: 0;
-  transform: translateY(12px) scale(0.99);
-  transition: opacity 0.22s cubic-bezier(0.32, 0.72, 0, 1),
-              transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+  transition: opacity var(--page-out) ease-in;
 }
 #reader.page-enter {
-  animation: pageEnter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: pageEnter var(--page-in) var(--ease-out) both;
 }
 @keyframes pageEnter {
-  0% {
-    opacity: 0;
-    transform: translateY(16px) scale(0.98);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
 }
 /* 阅读区容器最小高度，避免切换时跳动 */
 .reader-container {
