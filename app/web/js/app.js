@@ -922,8 +922,8 @@ async function switchPage(renderFn) {
     setTimeout(() => {
       reader.classList.remove('page-enter');
       isSwitching = false;
-    }, 500);
-  }, 160);
+    }, 520);
+  }, 100);
 }
 
 $$('.nav-item').forEach(item => {

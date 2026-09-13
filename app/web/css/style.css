@@ -75,14 +75,18 @@
        离开要快（别拖），进入要慢（丝滑感主要来自这里）。
      内容入场：中等时长 + 长尾缓出 + 波浪式错峰。
        位移保持克制（8px），但配长时长就变得柔和，不会像被推出来。 */
-  --page-out: 0.16s;
-  --page-in: 0.5s;
-  --enter-dur: 0.68s;
-  --enter-shift: 12px;
-  --enter-stagger: 0.05s;
-  /* 阻尼曲线：起步快、中段缓、末端有极轻微过冲再回落。
-     那条「缓住」的尾巴就是阻尼感的来源，纯 ease-out 会显得生硬。 */
+  /* 离开必须极快：旧内容只要停留一瞬就会被看成「残影」。 */
+  --page-out: 0.1s;
+  --page-in: 0.52s;
+  --enter-dur: 0.78s;
+  --enter-shift: 14px;
+  --enter-stagger: 0.055s;
+  /* 常规长尾缓出（无过冲） */
   --ease-silk: cubic-bezier(0.22, 1.18, 0.36, 1);
+  /* 弹簧阻尼曲线：起步快 → 轻微越过 → 收住回落。
+     「过冲后回稳」是弹簧的物理行为，普通缓动给不出，这就是「阻尼感」。
+     过冲幅度刻意控制在 8% 左右：够软，又不至于弹跳。 */
+  --ease-damped: cubic-bezier(0.34, 1.28, 0.42, 1);
 }
 
 /* ===== 全局动画基础 ===== */
@@ -586,7 +590,7 @@ body.theme-transition *::after {
   color: var(--text-secondary);
   padding: 72px 20px;
   font-family: var(--mono);
-  animation: fadeInUp 0.6s var(--ease-silk) both;
+  animation: fadeInUp 0.6s var(--ease-damped) both;
 }
 .reader .empty h2 {
   font-size: 20px;
@@ -594,11 +598,11 @@ body.theme-transition *::after {
   color: var(--text);
   font-weight: 500;
   letter-spacing: 0.02em;
-  animation: fadeInUp 0.6s 0.08s var(--ease-silk) both;
+  animation: fadeInUp 0.6s 0.08s var(--ease-damped) both;
 }
 .reader .empty p {
   font-size: 13px;
-  animation: fadeInUp 0.6s 0.16s var(--ease-silk) both;
+  animation: fadeInUp 0.6s 0.16s var(--ease-damped) both;
 }
 /* 空状态的快捷键提示：让用户一眼知道能做什么，而不是只有一句干巴巴的提示 */
 .reader .empty-hints {
@@ -609,7 +613,7 @@ body.theme-transition *::after {
   margin-top: 30px;
   font-size: 11px;
   color: var(--text-tertiary);
-  animation: fadeInUp 0.6s 0.24s var(--ease-silk) both;
+  animation: fadeInUp 0.6s 0.24s var(--ease-damped) both;
 }
 .reader .empty-hints kbd {
   display: inline-block;
@@ -909,7 +913,7 @@ body.theme-transition *::after {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  animation: fadeInUp var(--enter-dur) var(--ease-silk) both;
+  animation: fadeInUp var(--enter-dur) var(--ease-damped) both;
 }
 /* 依次浮现（错峰），而不是八个一起蹦出来 */
 .stat-card:nth-child(1) { animation-delay: calc(var(--enter-stagger) * 1); }
@@ -1024,7 +1028,7 @@ body.theme-transition *::after {
   overflow-x: auto;
   padding: 10px 0;
   /* 整块淡入，代替 188 个格子同时缩放的「炸开」 */
-  animation: fadeIn var(--enter-dur) var(--ease-silk) both;
+  animation: fadeIn var(--enter-dur) var(--ease-damped) both;
 }
 .heatmap {
   display: grid;
@@ -1142,7 +1146,7 @@ body.theme-transition *::after {
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
   /* 错峰延迟由 JS 按序号设置（见 loadArticlesList），避免几十条一起涌上来 */
-  animation: articleItemIn var(--enter-dur) var(--ease-silk) both;
+  animation: articleItemIn var(--enter-dur) var(--ease-damped) both;
 }
 @keyframes articleItemIn {
   from { opacity: 0; transform: translateY(var(--enter-shift)); }
@@ -1298,7 +1302,7 @@ body.theme-transition *::after {
   overflow: hidden;
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  animation: vocabItemIn var(--enter-dur) var(--ease-silk) both;
+  animation: vocabItemIn var(--enter-dur) var(--ease-damped) both;
 }
 @keyframes vocabItemIn {
   from { opacity: 0; transform: translateY(var(--enter-shift)); }
@@ -1718,7 +1722,7 @@ body.theme-transition *::after {
 .test-start-btn,
 .test-option,
 .test-result-card {
-  animation: enterFade var(--enter-dur) var(--ease-silk) both;
+  animation: enterFade var(--enter-dur) var(--ease-damped) both;
 }
 
 /* 测试结果 */
@@ -2033,17 +2037,23 @@ body.theme-transition *::after {
               transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
   will-change: opacity, transform;
 }
-/* 容器切换只做淡入淡出，绝不位移 —— 容器一移，整块内容就「跳」。 */
+/* 容器切换只做淡入淡出，绝不位移 —— 容器一移，整块内容就「跳」。
+   两段都用 animation 而不是 transition：
+   transition 在「移除类」的瞬间会反向补间一次，和淡入动画叠在一起，
+   旧内容会再闪过一下 —— 那正是第二层「残影」。 */
 #reader.page-fading {
-  opacity: 0;
-  transition: opacity var(--page-out) ease-in;
+  animation: pageOut var(--page-out) ease-in forwards;
+}
+@keyframes pageOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
 }
 #reader.page-enter {
-  animation: pageEnter var(--page-in) var(--ease-silk) both;
+  animation: pageIn var(--page-in) var(--ease-damped) both;
 }
-@keyframes pageEnter {
-  0%   { opacity: 0; }
-  100% { opacity: 1; }
+@keyframes pageIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 /* 阅读区容器最小高度，避免切换时跳动 */
 .reader-container {
