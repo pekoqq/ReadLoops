@@ -64,6 +64,7 @@ jobs:
         shell: bash
         env:
           READLOOPS_DATA_DIR: ${{ runner.temp }}/rl-data
+          PYTHONIOENCODING: utf-8
         run: |
           pip install dist/*.whl
           readloops --help

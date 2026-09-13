@@ -1,4 +1,6 @@
 """命令行入口测试。"""
+import pytest
+
 from app import cli, config
 
 
@@ -56,3 +58,16 @@ def test_serve_accepts_custom_port(monkeypatch):
     cli.main(["serve", "--port", "9001", "--no-browser"])
     assert called["port"] == 9001
     assert called["no_browser"] is True
+
+
+def test_help_survives_non_utf8_console(monkeypatch):
+    """Windows 控制台可能是 cp1252：打印中文帮助不得 UnicodeEncodeError（回归测试）。"""
+    import io
+    import sys
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--help"])
+    assert exc.value.code == 0

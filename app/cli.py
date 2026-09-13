@@ -138,7 +138,20 @@ def cmd_serve(args):
     return 0
 
 
+def _force_utf8_io():
+    """Windows 控制台默认代码页（cp1252/GBK 等）可能无法编码中文或符号，
+    统一把标准流重配置为 UTF-8，避免 UnicodeEncodeError。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv=None):
+    _force_utf8_io()
     parser = argparse.ArgumentParser(
         prog="readloops",
         description="ReadLoops — AI 驱动的英语阅读训练器",

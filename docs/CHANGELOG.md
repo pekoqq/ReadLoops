@@ -21,6 +21,7 @@
 - **统计热力图入场「炸开」**：188 个格子各自播放缩放动画 → 改为容器整块淡入
 - 清理两套互相覆盖的错峰逻辑，以及 `renderArticleDetail` 中 `return` 之后的死代码
 - 右侧边缘提示条过淡、专注模式顶部无提示 → 改为常驻呼吸提示
+- **Windows 控制台中文输出崩溃**：默认代码页（cp1252 等）无法编码中文，`readloops --help/init/doctor` 直接 UnicodeEncodeError → CLI 入口统一把标准流重配置为 UTF-8，并加回归测试与 CI 双保险（`PYTHONIOENCODING`）
 
 ### 动效
 - 容器 `#reader` 只做 opacity、不做位移，位移仅留给内容层（避免容器位移造成整页「跳动」）
