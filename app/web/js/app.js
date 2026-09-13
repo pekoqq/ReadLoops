@@ -106,8 +106,15 @@ function toast(msg, duration = 2000) {
 
 // 主题
 $('#themeSelect').addEventListener('change', (e) => {
+  // 切换瞬间临时开启全局颜色过渡，让四个主题之间平滑渐变而不是硬切。
+  // 过渡只在这 420ms 内生效，不会拖慢平时的交互动画。
+  document.body.classList.add('theme-transition');
   document.documentElement.setAttribute('data-theme', e.target.value);
   localStorage.setItem('yuedu-theme', e.target.value);
+  clearTimeout(window.__themeTransitionTimer);
+  window.__themeTransitionTimer = setTimeout(() => {
+    document.body.classList.remove('theme-transition');
+  }, 420);
 });
 const savedTheme = localStorage.getItem('yuedu-theme');
 if (savedTheme) {
@@ -923,7 +930,15 @@ $$('.nav-item').forEach(item => {
           const sidebar = $('#sidebar');
           sidebar.classList.remove('collapsed');
           sidebar.classList.remove('sidebar-visible');
-          $('#reader').innerHTML = `<div class="empty"><h2>ReadLoops</h2><p>点击「生成文章」开始阅读训练</p></div>`;
+          $('#reader').innerHTML = `<div class="empty">
+        <h2>ReadLoops</h2>
+        <p>点击「生成文章」开始阅读训练</p>
+        <div class="empty-hints">
+          <span><kbd>空格</kbd>开始 / 暂停计时</span>
+          <span><kbd>选中</kbd>查词 · 选整句翻译</span>
+          <span><kbd>F</kbd>专注模式</span>
+        </div>
+      </div>`;
         }
       } else if (view === 'articles') loadArticlesList();
       else if (view === 'vocab') loadVocab();
@@ -1152,7 +1167,15 @@ async function loadVocab() {
       if (currentArticle) {
         renderArticle(currentArticle);
       } else {
-        $('#reader').innerHTML = `<div class="empty"><h2>ReadLoops</h2><p>点击「生成文章」开始阅读训练</p></div>`;
+        $('#reader').innerHTML = `<div class="empty">
+        <h2>ReadLoops</h2>
+        <p>点击「生成文章」开始阅读训练</p>
+        <div class="empty-hints">
+          <span><kbd>空格</kbd>开始 / 暂停计时</span>
+          <span><kbd>选中</kbd>查词 · 选整句翻译</span>
+          <span><kbd>F</kbd>专注模式</span>
+        </div>
+      </div>`;
       }
     });
   }
