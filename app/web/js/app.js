@@ -655,7 +655,7 @@ function escapeHtml(s) { const d = document.createElement('div'); d.textContent 
  * 给成组出现的元素设置错峰延迟，避免它们「一起蹦出来」。
  * 延迟随序号递增，但有上限，防止长列表最后一项等太久。
  */
-function staggerIn(selector, step = 0.035, max = 0.36) {
+function staggerIn(selector, step = 0.02, max = 0.24) {
   $$(selector).forEach((el, i) => {
     el.style.animationDelay = Math.min(i * step, max) + 's';
   });
