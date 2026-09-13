@@ -231,6 +231,13 @@ function triggerRipple() {
 }
 
 function toggleFocusMode() {
+  // 专注模式只服务于「沉浸阅读」：非阅读页一律不允许进入。
+  // 这是兜底防线——无论从按钮、快捷键还是将来的新入口触发，都拦得住。
+  const view = document.querySelector('.nav-item.active')?.dataset.view;
+  if (!focusMode && view && view !== 'reader') {
+    toast('专注模式仅在阅读页可用');
+    return;
+  }
   focusMode = !focusMode;
   document.querySelector('.app').classList.toggle('focus-mode', focusMode);
   if (focusMode) {
@@ -341,8 +348,10 @@ document.addEventListener('keydown', (e) => {
     toggleFocusMode();
     return;
   }
-  // F 切换专注（不在输入框中时）
+  // F 切换专注（仅在阅读页、不在输入框中时）
   if (e.key === 'f' && !focusMode && !['INPUT','TEXTAREA'].includes(e.target.tagName)) {
+    const view = document.querySelector('.nav-item.active')?.dataset.view;
+    if (view !== 'reader') return;   // 非阅读页不响应，也不吞掉按键
     e.preventDefault();
     toggleFocusMode();
     return;
@@ -1047,14 +1056,14 @@ async function loadVocab() {
         <span class="hint">支持换行、空格、逗号分隔</span>
       </div>
     </div>
-    <div class="vocab-toolbar" id="vocabToolbar" style="display:none;">
+    <div class="vocab-toolbar" id="vocabToolbar">
       <label class="select-all-label">
         <input type="checkbox" id="selectAllVocab"> 全选
       </label>
-      <span id="selectedCount" style="font-size:12px;color:var(--text-secondary);">已选 0 个</span>
+      <span id="selectedCount" style="font-size:12px;color:var(--text-secondary);">勾选单词后可批量操作</span>
       <div class="vocab-toolbar-spacer"></div>
-      <button class="toolbar-btn" id="batchKnownBtn">标记已掌握</button>
-      <button class="toolbar-btn danger" id="batchDeleteBtn">删除选中</button>
+      <button class="toolbar-btn" id="batchKnownBtn" disabled>标记已掌握</button>
+      <button class="toolbar-btn danger" id="batchDeleteBtn" disabled>删除选中</button>
     </div>
     <div id="vocabList">` +
     (words.length === 0 ? '<p style="color:var(--text-secondary); padding:16px 0;">还没有生词</p>' :
@@ -1226,17 +1235,22 @@ async function loadVocab() {
 
 function updateVocabToolbar() {
   const toolbar = $('#vocabToolbar');
+  if (!toolbar) return;
   const count = selectedWordIds.size;
-  if (count > 0) {
-    toolbar.style.display = 'flex';
-    $('#selectedCount').textContent = `已选 ${count} 个`;
-  } else {
-    toolbar.style.display = 'none';
-  }
+  const hasSelection = count > 0;
+  // 工具栏常驻显示：之前默认隐藏，导致用户根本找不到批量操作入口。
+  // 改为常驻 + 未选中时按钮置灰，功能一眼可见。
+  toolbar.style.display = 'flex';
+  const counter = $('#selectedCount');
+  if (counter) counter.textContent = hasSelection ? `已选 ${count} 个` : '勾选单词后可批量操作';
+  const knownBtn = $('#batchKnownBtn');
+  const delBtn = $('#batchDeleteBtn');
+  if (knownBtn) knownBtn.disabled = !hasSelection;
+  if (delBtn) delBtn.disabled = !hasSelection;
   const selectAll = $('#selectAllVocab');
   if (selectAll) {
     const total = $$('.vocab-checkbox').length;
-    selectAll.checked = count === total && total > 0;
+    selectAll.checked = hasSelection && count === total;
   }
 }
 

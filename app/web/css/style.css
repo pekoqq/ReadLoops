@@ -1245,6 +1245,12 @@ body {
   background: #ff6b6b;
   color: #fff;
 }
+/* 批量操作按钮：未勾选单词时置灰不可点 */
+.vocab-toolbar .toolbar-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 /* 单词测试 */
 .test-intro {
