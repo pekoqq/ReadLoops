@@ -71,11 +71,11 @@
   --btn-hover-shadow: 0 6px 18px rgba(0,0,0,0.22);
 
   /* ===== 入场动画节奏 =====
-     内容入场**只做淡入、不做位移**：位移会和容器的切换动画叠加，
-     产生「文字被挤开 / 整块内容挤上来」的错觉。
-     错峰步长保持很小，视觉上几乎同时浮现，但有微妙层次。 */
-  --enter-dur: 0.3s;
-  --enter-stagger: 0.025s;
+     统一时长与位移，避免各处快慢不一；
+     成组的元素（卡片 / 列表）用错峰延迟依次浮现，而不是一起蹦出来。 */
+  --enter-dur: 0.55s;
+  --enter-shift: 10px;
+  --enter-stagger: 0.04s;
 }
 
 /* ===== 全局动画基础 ===== */
@@ -91,21 +91,17 @@
               transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .page-enter {
-  animation: pageEnter 0.26s var(--ease-out) both;
+  animation: pageEnter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-/* 注意：pageEnter 关键帧统一定义在文件后部（#reader.page-enter 附近）。
-   此前这里有一份重复定义会覆盖它，已删除以免混淆。 */
+@keyframes pageEnter {
+  0% { opacity: 0; transform: scale(0.97) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
 
 /* 元素入场动画 */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
-}
-/* 内容入场：纯淡入。用于卡片 / 列表等成组元素 ——
-   它们本身已带错峰延迟，再加位移就会显得「挤」。 */
-@keyframes enterFade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
 }
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -906,7 +902,7 @@ body.theme-transition *::after {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  animation: enterFade var(--enter-dur) var(--ease-out) both;
+  animation: fadeInUp var(--enter-dur) var(--ease-out) both;
 }
 /* 依次浮现（错峰），而不是八个一起蹦出来 */
 .stat-card:nth-child(1) { animation-delay: calc(var(--enter-stagger) * 1); }
@@ -1138,8 +1134,8 @@ body.theme-transition *::after {
   overflow: hidden;
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  /* 纯淡入 + JS 按序号设置的错峰延迟（见 loadArticlesList） */
-  animation: enterFade var(--enter-dur) var(--ease-out) both;
+  /* 错峰延迟由 JS 按序号设置（见 loadArticlesList），避免几十条一起涌上来 */
+  animation: articleItemIn var(--enter-dur) var(--ease-out) both;
 }
 @keyframes articleItemIn {
   from { opacity: 0; transform: translateY(14px) scale(0.98); }
@@ -1295,7 +1291,7 @@ body.theme-transition *::after {
   overflow: hidden;
   box-shadow: var(--glass-inner-shadow);
   opacity: 0;
-  animation: enterFade var(--enter-dur) var(--ease-out) both;
+  animation: vocabItemIn var(--enter-dur) var(--ease-out) both;
 }
 @keyframes vocabItemIn {
   from { opacity: 0; transform: translateY(12px) scale(0.98); }
@@ -2021,19 +2017,24 @@ body.theme-transition *::after {
               transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
   will-change: opacity, transform;
 }
-/* 页面切换只做淡入淡出，容器本身不位移、不缩放。
-   之前容器会 translateY + scale，和卡片自己的入场动画叠加，
-   看起来就是「整块内容挤上来」，非常跳。 */
 #reader.page-fading {
   opacity: 0;
-  transition: opacity 0.16s ease-out;
+  transform: translateY(12px) scale(0.99);
+  transition: opacity 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+              transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
 }
 #reader.page-enter {
-  animation: pageEnter 0.26s var(--ease-out) both;
+  animation: pageEnter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes pageEnter {
-  0%   { opacity: 0; }
-  100% { opacity: 1; }
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 /* 阅读区容器最小高度，避免切换时跳动 */
 .reader-container {
