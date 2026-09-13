@@ -260,6 +260,12 @@ function toggleFocusMode() {
 
 // 文章互动自动开启专注模式
 function tryAutoFocus() {
+  // 只在阅读页自动进入专注。
+  // 生词本 / 历史文章 / 统计页的内容同样渲染在 #readerContainer 里，
+  // 在这些页面点一下也会走到这里；若不拦住，autoFocusTriggered 会被
+  // 提前置为 true，回到阅读页后自动专注就再也触发不了了。
+  const view = document.querySelector('.nav-item.active')?.dataset.view;
+  if (view !== 'reader') return;
   if (focusMode || autoFocusTriggered || !currentArticle) return;
   autoFocusTriggered = true;
   toggleFocusMode();

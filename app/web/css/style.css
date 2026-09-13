@@ -12,16 +12,21 @@
   --text-tertiary: #666666;
   /* 液态玻璃 — 参考 shuding/liquid-glass
      核心：SVG位移折射 + 多层backdrop-filter + 内阴影立体感 */
-  --glass: rgba(32,29,29,0.45);
-  --glass-strong: rgba(32,29,29,0.65);
-  --glass-border: rgba(253,252,252,0.06);
-  --glass-border-strong: rgba(253,252,252,0.14);
+  /* 玻璃表面：必须用「比背景亮」的浅色半透明，才能在深色底上形成磨砂层次。
+     之前是 rgba(32,29,29,0.45)——比背景只亮一丁点，肉眼几乎看不出玻璃。 */
+  --glass: rgba(253,252,252,0.085);
+  --glass-strong: rgba(253,252,252,0.135);
+  --glass-border: rgba(253,252,252,0.13);
+  --glass-border-strong: rgba(253,252,252,0.24);
   --glass-blur: blur(20px) saturate(180%) contrast(1.1) brightness(1.05);
   --glass-blur-strong: blur(28px) saturate(200%) contrast(1.15) brightness(1.08);
   --glass-liquid: url(#liquid-glass) blur(16px) saturate(180%) contrast(1.1) brightness(1.05);
   --glass-liquid-strong: url(#liquid-glass-strong) blur(24px) saturate(200%) contrast(1.15) brightness(1.08);
-  --glass-shadow: 0 8px 32px rgba(0,0,0,0.3);
-  --glass-inner-shadow: inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.25), inset 0 8px 24px rgba(0,0,0,0.08);
+  --glass-shadow: 0 8px 32px rgba(0,0,0,0.35);
+  /* 玻璃厚度：顶部一道亮边 + 底部一道暗边 —— 这是「玻璃感」的主要来源 */
+  --glass-inner-shadow: inset 0 1px 0 rgba(255,255,255,0.20),
+                        inset 0 -1px 0 rgba(0,0,0,0.32),
+                        inset 0 8px 24px rgba(0,0,0,0.10);
   --accent: #fdfcfc;
   --accent-hover: #ffffff;
   --highlight: rgba(253,252,252,0.1);
@@ -40,6 +45,12 @@
   --transition-ease-out: 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   --mono: "Berkeley Mono", "SF Mono", "JetBrains Mono", "Menlo", "Consolas", monospace;
   --ripple-color: rgba(255,255,255,0.06);
+
+  /* 背景氛围光：给毛玻璃提供「可折射的内容」。
+     纯色背景下 backdrop-filter 无从发挥（模糊纯色还是纯色），
+     玻璃会显得很平；加入极淡光斑后，模糊才产生真正的层次感。 */
+  --ambient-1: rgba(140,130,255,0.07);
+  --ambient-2: rgba(255,160,100,0.045);
 
   /* ===== 按钮设计系统 =====
      全站按钮共用这套 token。之前每个按钮各写各的，
@@ -186,6 +197,8 @@
   --accent: #3d3528;
   --highlight: rgba(180, 140, 60, 0.3);
   --ripple-color: rgba(60,45,20,0.12);
+  --ambient-1: rgba(190,150,70,0.12);
+  --ambient-2: rgba(130,95,50,0.07);
 }
 
 /* 明亮 — 柔和米白，不刺眼 */
@@ -203,6 +216,8 @@
   --accent: #2a2a2a;
   --highlight: rgba(255, 213, 79, 0.35);
   --ripple-color: rgba(0,0,0,0.11);
+  --ambient-1: rgba(120,140,255,0.08);
+  --ambient-2: rgba(255,180,120,0.07);
 }
 
 /* 纯黑 */
@@ -212,13 +227,16 @@
   --text: #fdfcfc;
   --text-secondary: #888888;
   --text-tertiary: #555555;
-  --glass: rgba(10,10,10,0.9);
-  --glass-strong: rgba(10,10,10,0.97);
-  --glass-border: rgba(253,252,252,0.1);
-  --glass-border-strong: rgba(253,252,252,0.2);
+  /* 纯黑主题同样需要「比背景亮」的表面，否则玻璃完全不可见 */
+  --glass: rgba(253,252,252,0.07);
+  --glass-strong: rgba(253,252,252,0.11);
+  --glass-border: rgba(253,252,252,0.12);
+  --glass-border-strong: rgba(253,252,252,0.20);
   --accent: #fdfcfc;
   --highlight: rgba(253,252,252,0.12);
   --ripple-color: rgba(255,255,255,0.08);
+  --ambient-1: rgba(140,130,255,0.09);
+  --ambient-2: rgba(255,160,100,0.055);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -232,6 +250,18 @@ body {
   transition: background 0.2s, color 0.2s;
   -webkit-font-smoothing: antialiased;
   font-size: 13px;
+}
+
+/* 氛围光层：固定在最底层，为毛玻璃提供可折射的内容 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(58% 48% at 16% 10%, var(--ambient-1), transparent 68%),
+    radial-gradient(52% 46% at 86% 90%, var(--ambient-2), transparent 70%);
 }
 
 /* 布局 */
@@ -386,8 +416,8 @@ body {
   border-radius: var(--btn-radius);
   border: 1px solid var(--glass-border-strong);
   background: var(--glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-liquid);
+  -webkit-backdrop-filter: var(--glass-liquid);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
@@ -401,7 +431,8 @@ body {
   user-select: none;
   position: relative;
   overflow: hidden;
-  box-shadow: var(--glass-inner-shadow);
+  /* 默认就带一点外阴影：让按钮「浮」在背景上，而不像贴在背景里的色块 */
+  box-shadow: var(--glass-inner-shadow), 0 1px 3px rgba(0,0,0,0.16);
   transition: background 0.2s var(--ease-out),
               border-color 0.2s var(--ease-out),
               color 0.2s var(--ease-out),
@@ -564,8 +595,8 @@ body {
   border-radius: var(--btn-radius);
   border: 1px solid var(--glass-border-strong);
   background: var(--glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-liquid);
+  -webkit-backdrop-filter: var(--glass-liquid);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 11px;
@@ -625,8 +656,8 @@ body {
   border-radius: var(--btn-radius);
   border: 1px solid var(--glass-border-strong);
   background: var(--glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-liquid);
+  -webkit-backdrop-filter: var(--glass-liquid);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 11px;
@@ -719,8 +750,8 @@ body {
 
 .modal {
   background: var(--glass-strong);
-  backdrop-filter: var(--glass-blur-strong);
-  -webkit-backdrop-filter: var(--glass-blur-strong);
+  backdrop-filter: var(--glass-liquid-strong);
+  -webkit-backdrop-filter: var(--glass-liquid-strong);
   border: 1px solid var(--glass-border-strong);
   border-radius: var(--radius-lg);
   padding: 24px;
@@ -2141,12 +2172,14 @@ body {
 
 .app-dialog {
   background: var(--glass-strong);
+  backdrop-filter: var(--glass-liquid-strong);
+  -webkit-backdrop-filter: var(--glass-liquid-strong);
   border: 1px solid var(--glass-border-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 24px 28px;
   max-width: 360px;
   width: 90%;
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--glass-shadow), var(--glass-inner-shadow);
   animation: app-dialog-pop 0.18s ease;
 }
 
