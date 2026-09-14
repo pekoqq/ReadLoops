@@ -126,12 +126,92 @@ CREATE TABLE IF NOT EXISTS test_questions (
     created_at INTEGER
 );
 
+-- ========== 书架：公共领域书籍（Project Gutenberg / Standard Ebooks）==========
+-- 只存元数据与本地路径，书籍文件落在 data/library/，不进版本库。
+CREATE TABLE IF NOT EXISTS books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL DEFAULT 'gutenberg',
+    source_id TEXT,                      -- 来源站点的书号
+    title TEXT NOT NULL,
+    author TEXT,
+    language TEXT DEFAULT 'en',
+    subjects TEXT DEFAULT '[]',          -- JSON 数组
+    format TEXT DEFAULT 'txt',           -- txt / epub
+    download_url TEXT,
+    local_path TEXT,                     -- 下载后的本地文件路径
+    word_count INTEGER DEFAULT 0,
+    difficulty_score REAL,               -- 可读性评分（越低越简单）
+    status TEXT DEFAULT 'downloaded',    -- downloaded / parsed / imported / failed
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ========== 材料：用户导入的任意文本（教材、讲义、自备真题等）==========
+-- 材料内容只存在用户本机，用于蒸馏与出题，不随项目分发。
+CREATE TABLE IF NOT EXISTS materials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'file',   -- file / paste / book
+    source_path TEXT,
+    content TEXT,                        -- 解析后的纯文本
+    word_count INTEGER DEFAULT 0,
+    para_count INTEGER DEFAULT 0,
+    sentence_count INTEGER DEFAULT 0,
+    parse_status TEXT DEFAULT 'pending', -- pending / parsed / failed
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+-- ========== 蒸馏：从材料中提取的风格画像 ==========
+-- 只保存统计特征（事实性数据），不保存原文。
+CREATE TABLE IF NOT EXISTS style_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    material_ids TEXT DEFAULT '[]',      -- JSON 数组：参与蒸馏的材料
+    params TEXT NOT NULL DEFAULT '{}',   -- JSON：句长/词频/语法结构等统计量
+    sample_count INTEGER DEFAULT 0,      -- 参与统计的句子数
+    is_active INTEGER DEFAULT 0,         -- 当前生效的画像（生成文章时使用）
+    created_at INTEGER NOT NULL
+);
+
+-- ========== 知识图谱：节点与边 ==========
+-- 同一份图两套用途：前端可视化（给用户看）+ 结构化检索（给 AI 用）。
+CREATE TABLE IF NOT EXISTS graph_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_type TEXT NOT NULL,             -- word / article / material / book / phrase / grammar
+    ref_id INTEGER,                      -- 指向对应表的行
+    label TEXT NOT NULL,
+    weight REAL DEFAULT 1.0,             -- 节点大小
+    meta TEXT DEFAULT '{}',              -- JSON：附加信息
+    created_at INTEGER NOT NULL,
+    UNIQUE(node_type, ref_id)
+);
+
+CREATE TABLE IF NOT EXISTS graph_edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id INTEGER NOT NULL,
+    target_id INTEGER NOT NULL,
+    edge_type TEXT NOT NULL DEFAULT 'cooccur',  -- cooccur / contains / similar / derives
+    weight REAL DEFAULT 1.0,
+    created_at INTEGER NOT NULL,
+    UNIQUE(source_id, target_id, edge_type),
+    FOREIGN KEY (source_id) REFERENCES graph_nodes(id),
+    FOREIGN KEY (target_id) REFERENCES graph_nodes(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_words_status ON words(status);
 CREATE INDEX IF NOT EXISTS idx_words_level ON words(level);
-CREATE INDEX IF NOT EXISTS idx_words_lemma ON words(lemma);
 CREATE INDEX IF NOT EXISTS idx_phrases_level ON phrases(level);
 CREATE INDEX IF NOT EXISTS idx_test_questions_test_id ON test_questions(test_id);
 CREATE INDEX IF NOT EXISTS idx_test_questions_word_id ON test_questions(word_id);
+CREATE INDEX IF NOT EXISTS idx_books_status ON books(status);
+CREATE INDEX IF NOT EXISTS idx_materials_status ON materials(parse_status);
+CREATE INDEX IF NOT EXISTS idx_style_profiles_active ON style_profiles(is_active);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id);
 """
 
 DEFAULT_SETTINGS = {
@@ -172,6 +252,22 @@ def _ensure_columns(conn):
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
+def _dedupe_books(conn):
+    """书架去重：同一来源的同一本书只保留最早一条。
+
+    早期版本没有唯一约束，重复下载同一本书会插入多条记录。
+    这里先清理，再建唯一索引（顺序不能反，否则索引创建会因脏数据失败）。
+    """
+    conn.execute(
+        """DELETE FROM books WHERE id NOT IN (
+               SELECT MIN(id) FROM books GROUP BY source, source_id
+           )"""
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_books_source ON books(source, source_id)"
+    )
+
+
 def init_db():
     """初始化数据库：建表、补齐缺失列、插入默认数据。"""
     import time
@@ -179,6 +275,7 @@ def init_db():
     with get_db() as conn:
         conn.executescript(SCHEMA)
         _ensure_columns(conn)
+        _dedupe_books(conn)
         # 默认用户
         conn.execute("INSERT OR IGNORE INTO users (id, name, created_at) VALUES (1, '用户1', ?)", (now,))
         # 默认设置

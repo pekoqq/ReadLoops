@@ -1,6 +1,8 @@
 // ReadLoops 阅读器
 const $ = (s) => document.querySelector(s);
-const $$ = (s) => document.querySelectorAll(s);
+// 返回真数组（而不是 NodeList）：NodeList 没有 filter/map 等方法，
+// 图谱页需要按类型过滤节点，用数组更省事；forEach 用法完全兼容。
+const $$ = (s) => Array.from(document.querySelectorAll(s));
 
 let currentArticle = null;
 let timerInterval = null;
@@ -1004,6 +1006,9 @@ $$('.nav-item').forEach(item => {
       else if (view === 'vocab') loadVocab();
       else if (view === 'test') loadTest();
       else if (view === 'stats') loadStats();
+      else if (view === 'library') loadLibrary();
+      else if (view === 'materials') loadMaterials();
+      else if (view === 'graph') loadGraph();
     });
   });
 });
@@ -1976,3 +1981,549 @@ function showDailyTestModal() {
 
 // 页面加载后延迟检查弹窗
 setTimeout(checkDailyTestPrompt, 1500);
+
+// ============================================================
+// 知识库：书架 / 材料 / 知识图谱
+// 三者串成一条链路：书架拿书 → 导入为材料 → 蒸馏出风格画像 → 图谱沉淀关联
+// ============================================================
+
+const TYPE_LABEL = { word: '词', phrase: '短语', article: '文章', material: '材料', book: '书' };
+
+// ---------------------------------------------------------------- 书架
+
+let libraryQuery = '';
+
+async function loadLibrary() {
+  const books = await api.get('/api/books');
+  const cards = books.length === 0
+    ? `<div class="kb-empty">书架还是空的。搜一本公版书试试——这里的书都可以合法下载与自由使用。</div>`
+    : books.map(b => `
+      <div class="kb-card" data-book-id="${b.id}">
+        <div class="kb-card-main">
+          <div class="kb-card-title">${escapeHtml(b.title)}</div>
+          <div class="kb-card-meta">
+            ${b.author ? escapeHtml(b.author) + ' · ' : ''}${b.word_count ? b.word_count.toLocaleString() + ' 词 · ' : ''}
+            <span class="kb-badge kb-badge-${b.status}">${bookStatusText(b.status)}</span>
+          </div>
+        </div>
+        <div class="kb-card-actions">
+          ${b.status !== 'imported' ? `<button class="kb-mini-btn" data-act="import" data-id="${b.id}">导入材料</button>` : ''}
+          <button class="kb-mini-btn kb-mini-danger" data-act="del" data-id="${b.id}">移除</button>
+        </div>
+      </div>`).join('');
+
+  $('#reader').innerHTML = `
+    <h1>书架</h1>
+    <p class="kb-sub">收录公共领域书籍，可自由下载与使用。下载后点「导入材料」，就能参与蒸馏和出题。</p>
+
+    <div class="kb-search">
+      <input type="text" id="bookSearchInput" placeholder="搜索书名或作者，例如 alice / sherlock holmes" value="${escapeHtml(libraryQuery)}">
+      <button class="toolbar-btn primary" id="bookSearchBtn">搜索</button>
+    </div>
+    <div id="bookSearchResults"></div>
+
+    <div class="kb-section-title">我的书架 <span class="kb-count">${books.length}</span></div>
+    <div class="kb-list">${cards}</div>
+  `;
+
+  $('#bookSearchBtn').addEventListener('click', doBookSearch);
+  $('#bookSearchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doBookSearch();
+  });
+  if (libraryQuery) doBookSearch();
+
+  $$('.kb-card-actions .kb-mini-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      if (btn.dataset.act === 'import') {
+        btn.disabled = true;
+        btn.textContent = '导入中…';
+        const r = await api.post(`/api/books/${id}/import`, {});
+        if (r.ok) {
+          toast(`已导入，${r.word_count.toLocaleString()} 词`);
+          loadLibrary();
+        } else {
+          toast(r.detail || r.error || '导入失败');
+          btn.disabled = false;
+          btn.textContent = '导入材料';
+        }
+      } else if (btn.dataset.act === 'del') {
+        if (!await confirmDialog('确定从书架移除这本书吗？本地文件也会删除。', { danger: true })) return;
+        await api.del(`/api/books/${id}`);
+        toast('已移除');
+        loadLibrary();
+      }
+    });
+  });
+}
+
+function bookStatusText(s) {
+  return { downloaded: '已下载', imported: '已导入', parsed: '已解析', failed: '失败' }[s] || s;
+}
+
+async function doBookSearch() {
+  const q = $('#bookSearchInput').value.trim();
+  libraryQuery = q;
+  const box = $('#bookSearchResults');
+  if (!q) { box.innerHTML = ''; return; }
+
+  box.innerHTML = `<div class="kb-loading"><span class="loading"></span> 正在搜索…</div>`;
+  let data;
+  try {
+    data = await api.get(`/api/books/search?q=${encodeURIComponent(q)}`);
+  } catch (e) {
+    box.innerHTML = `<div class="kb-empty">搜索失败：${escapeHtml(e.message || '书源不可达')}</div>`;
+    return;
+  }
+  if (!data.results || data.results.length === 0) {
+    box.innerHTML = `<div class="kb-empty">没找到相关书籍，换个关键词试试。</div>`;
+    return;
+  }
+
+  box.innerHTML = `
+    <div class="kb-section-title">搜索结果 <span class="kb-count">${data.results.length}</span></div>
+    <div class="kb-list">
+      ${data.results.map(b => `
+        <div class="kb-card kb-card-result">
+          <div class="kb-card-main">
+            <div class="kb-card-title">${escapeHtml(b.title)}</div>
+            <div class="kb-card-meta">
+              ${b.author ? escapeHtml(b.author) + ' · ' : ''}${b.downloads ? b.downloads.toLocaleString() + ' 次下载' : ''}
+            </div>
+          </div>
+          <div class="kb-card-actions">
+            <button class="kb-mini-btn kb-mini-primary" data-act="dl"
+                    data-sid="${b.source_id}" data-title="${escapeHtml(b.title)}"
+                    data-author="${escapeHtml(b.author || '')}">下载</button>
+          </div>
+        </div>`).join('')}
+    </div>
+  `;
+
+  $$('#bookSearchResults .kb-mini-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = '下载中…';
+      try {
+        const r = await api.post('/api/books/download', {
+          source_id: btn.dataset.sid,
+          title: btn.dataset.title,
+          author: btn.dataset.author,
+        });
+        toast(`已下载：${r.word_count.toLocaleString()} 词`);
+        loadLibrary();
+      } catch (e) {
+        toast(e.message || '下载失败');
+        btn.disabled = false;
+        btn.textContent = '下载';
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------- 材料
+
+async function loadMaterials() {
+  const [items, profiles] = await Promise.all([
+    api.get('/api/materials'),
+    api.get('/api/materials/profiles/all'),
+  ]);
+
+  const list = items.length === 0
+    ? `<div class="kb-empty">还没有材料。粘贴一段文本，或从书架导入一本书。</div>`
+    : items.map(m => `
+      <div class="kb-card" data-mid="${m.id}">
+        <div class="kb-card-main">
+          <div class="kb-card-title">${escapeHtml(m.title)}</div>
+          <div class="kb-card-meta">
+            ${m.parse_status === 'failed'
+              ? `<span class="kb-badge kb-badge-failed">解析失败</span>`
+              : `${(m.word_count || 0).toLocaleString()} 词 · ${m.sentence_count || 0} 句 · ${m.para_count || 0} 段`}
+          </div>
+          ${m.parse_status === 'failed' && m.error ? `<div class="kb-error">${escapeHtml(m.error)}</div>` : ''}
+        </div>
+        <div class="kb-card-actions">
+          <label class="kb-check"><input type="checkbox" class="mat-pick" value="${m.id}"></label>
+          <button class="kb-mini-btn kb-mini-danger" data-act="del" data-id="${m.id}">删除</button>
+        </div>
+      </div>`).join('');
+
+  const profileCards = profiles.length === 0
+    ? `<div class="kb-empty">还没有画像。勾选材料后点「蒸馏」生成。</div>`
+    : profiles.map(p => `
+      <div class="kb-card kb-card-profile ${p.is_active ? 'is-active' : ''}">
+        <div class="kb-card-main">
+          <div class="kb-card-title">${escapeHtml(p.name)}${p.is_active ? ' <span class="kb-badge kb-badge-active">生效中</span>' : ''}</div>
+          <div class="kb-card-meta">${p.sample_count.toLocaleString()} 句 · 平均句长 ${(p.params.avg_len || 0)} 词 · 复合句 ${Math.round((p.params.compound_ratio || 0) * 100)}%</div>
+        </div>
+        <div class="kb-card-actions">
+          ${p.is_active ? '' : `<button class="kb-mini-btn kb-mini-primary" data-act="activate" data-id="${p.id}">设为生效</button>`}
+          <button class="kb-mini-btn kb-mini-danger" data-act="del-profile" data-id="${p.id}">删除</button>
+        </div>
+      </div>`).join('');
+
+  $('#reader').innerHTML = `
+    <h1>材料</h1>
+    <p class="kb-sub">材料只留在本机，用于蒸馏与出题。材料越多，风格画像越准。</p>
+
+    <div class="kb-panel">
+      <div class="kb-panel-title">粘贴导入</div>
+      <input type="text" id="matTitle" class="kb-input" placeholder="材料标题（可留空）">
+      <textarea id="matContent" class="kb-textarea" placeholder="把英文文本粘贴到这里…"></textarea>
+      <div class="kb-panel-actions">
+        <button class="toolbar-btn primary" id="matPasteBtn">导入</button>
+      </div>
+    </div>
+
+    <div class="kb-panel">
+      <div class="kb-panel-title">从本地文件导入</div>
+      <input type="text" id="matPath" class="kb-input" placeholder="文件绝对路径，支持 .txt / .md / .epub / .pdf">
+      <div class="kb-panel-actions">
+        <button class="toolbar-btn" id="matFileBtn">导入文件</button>
+      </div>
+      <div class="kb-hint">PDF 需要额外依赖：轻量用 <code>pip install pypdf</code>，扫描件/复杂版式建议 <code>pip install 'mineru[core]'</code>。</div>
+    </div>
+
+    <div class="kb-section-title">材料 <span class="kb-count">${items.length}</span></div>
+    <div class="kb-list">${list}</div>
+
+    <div class="kb-panel">
+      <div class="kb-panel-title">蒸馏</div>
+      <div class="kb-hint">勾选上面的材料（可多选），点蒸馏生成风格画像。多份材料会合并统计，分布更真实。</div>
+      <div class="kb-panel-actions">
+        <button class="toolbar-btn primary" id="distillBtn">蒸馏选中材料</button>
+        <span class="kb-hint-inline" id="pickCount">已选 0 份</span>
+      </div>
+    </div>
+
+    <div class="kb-section-title">风格画像 <span class="kb-count">${profiles.length}</span></div>
+    <div class="kb-list">${profileCards}</div>
+  `;
+
+  const picks = $$('.mat-pick');
+  const updatePick = () => {
+    $('#pickCount').textContent = `已选 ${picks.filter(p => p.checked).length} 份`;
+  };
+  picks.forEach(p => p.addEventListener('change', updatePick));
+
+  $('#matPasteBtn').addEventListener('click', async () => {
+    const content = $('#matContent').value.trim();
+    if (!content) { toast('请先粘贴内容'); return; }
+    const r = await api.post('/api/materials/paste', {
+      title: $('#matTitle').value.trim(), content,
+    });
+    toast(`已导入，${r.word_count.toLocaleString()} 词`);
+    loadMaterials();
+  });
+
+  $('#matFileBtn').addEventListener('click', async () => {
+    const path = $('#matPath').value.trim();
+    if (!path) { toast('请填写文件路径'); return; }
+    const r = await api.post('/api/materials/import', { path });
+    if (r.ok) {
+      toast(`已导入，${r.word_count.toLocaleString()} 词`);
+      loadMaterials();
+    } else {
+      await showAlert(r.detail || r.error || '导入失败');
+      loadMaterials();
+    }
+  });
+
+  $('#distillBtn').addEventListener('click', async () => {
+    const ids = picks.filter(p => p.checked).map(p => parseInt(p.value));
+    if (!ids.length) { toast('请先勾选材料'); return; }
+    const btn = $('#distillBtn');
+    btn.disabled = true;
+    btn.textContent = '蒸馏中…';
+    try {
+      const r = await api.post('/api/materials/distill', { material_ids: ids, activate: true });
+      toast(`已生成画像，样本 ${r.params.sentence_count} 句`);
+      loadMaterials();
+    } catch (e) {
+      toast(e.message || '蒸馏失败');
+      btn.disabled = false;
+      btn.textContent = '蒸馏选中材料';
+    }
+  });
+
+  $$('.kb-card-actions .kb-mini-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      if (btn.dataset.act === 'del') {
+        if (!await confirmDialog('确定删除这份材料吗？', { danger: true })) return;
+        await api.del(`/api/materials/${id}`);
+        toast('已删除');
+        loadMaterials();
+      } else if (btn.dataset.act === 'activate') {
+        await api.post(`/api/materials/profiles/${id}/activate`, {});
+        toast('已设为生效画像');
+        loadMaterials();
+      } else if (btn.dataset.act === 'del-profile') {
+        if (!await confirmDialog('确定删除这个画像吗？', { danger: true })) return;
+        await api.del(`/api/materials/profiles/${id}`);
+        toast('已删除');
+        loadMaterials();
+      }
+    });
+  });
+}
+
+// ---------------------------------------------------------------- 知识图谱
+
+let graphState = null;
+
+async function loadGraph() {
+  $('#reader').innerHTML = `
+    <h1>知识图谱</h1>
+    <p class="kb-sub">你的词、短语与文章连成一张网。点节点看关联，拖拽可以调整位置。</p>
+    <div class="kb-toolbar">
+      <button class="toolbar-btn" id="graphRebuildBtn">重建图谱</button>
+      <div class="kb-filters" id="graphFilters">
+        <label class="kb-check"><input type="checkbox" value="word" checked> 词</label>
+        <label class="kb-check"><input type="checkbox" value="phrase" checked> 短语</label>
+        <label class="kb-check"><input type="checkbox" value="article" checked> 文章</label>
+        <label class="kb-check"><input type="checkbox" value="material" checked> 材料</label>
+      </div>
+      <span class="kb-hint-inline" id="graphStats"></span>
+    </div>
+    <div class="graph-stage" id="graphStage">
+      <canvas id="graphCanvas"></canvas>
+      <div class="graph-tip" id="graphTip"></div>
+    </div>
+  `;
+
+  $('#graphRebuildBtn').addEventListener('click', async () => {
+    const btn = $('#graphRebuildBtn');
+    btn.disabled = true;
+    btn.textContent = '重建中…';
+    const s = await api.post('/api/graph/rebuild', {});
+    toast(`图谱已重建：${s.nodes} 节点 / ${s.edges} 边`);
+    btn.disabled = false;
+    btn.textContent = '重建图谱';
+    drawGraph();
+  });
+
+  $$('#graphFilters input').forEach(cb => cb.addEventListener('change', drawGraph));
+
+  await drawGraph();
+}
+
+async function drawGraph() {
+  const types = $$('#graphFilters input').filter(c => c.checked).map(c => c.value);
+  const canvas = $('#graphCanvas');
+  const stage = $('#graphStage');
+  if (!canvas || !stage) return;
+
+  if (!types.length) {
+    $('#graphStats').textContent = '请至少选择一种节点类型';
+    graphState = null;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  const data = await api.get(`/api/graph?types=${types.join(',')}&limit=400`);
+  $('#graphStats').textContent = `${data.nodes.length} 节点 · ${data.edges.length} 边`;
+
+  if (!data.nodes.length) {
+    $('#graphStats').textContent = '图谱是空的，点「重建图谱」试试';
+    graphState = null;
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = stage.clientWidth, H = stage.clientHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // 初始布局：按类型分环，避免全部堆在中心
+  const typeOrder = ['article', 'material', 'phrase', 'word'];
+  const nodes = data.nodes.map((n, i) => {
+    const ring = Math.max(1, typeOrder.indexOf(n.type) + 1);
+    const a = (i / data.nodes.length) * Math.PI * 2 + ring;
+    const r = Math.min(W, H) * 0.12 * ring;
+    return {
+      ...n,
+      x: W / 2 + Math.cos(a) * r,
+      y: H / 2 + Math.sin(a) * r,
+      vx: 0, vy: 0,
+      deg: 0,
+    };
+  });
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const links = data.edges
+    .map(e => ({ s: byId.get(e.source), t: byId.get(e.target), w: e.weight, type: e.type }))
+    .filter(l => l.s && l.t);
+  links.forEach(l => { l.s.deg++; l.t.deg++; });
+
+  const palette = {
+    word: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#fdfcfc',
+    phrase: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8c82ff',
+    article: '#5dcaa5',
+    material: '#ef9f27',
+  };
+
+  graphState = { nodes, links, byId, ctx, W, H, palette, drag: null, hover: null, selected: null };
+
+  // ---- 物理迭代（弹簧 + 斥力），在动画帧里逐步收敛
+  function tick() {
+    const st = graphState;
+    if (!st) return;
+    const { nodes, links } = st;
+    const k = 0.02;
+    // 斥力
+    for (let i = 0; i < nodes.length; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < nodes.length; j++) {
+        const b = nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) { d2 = 1; dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
+        const f = 900 / d2;
+        const d = Math.sqrt(d2);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+    // 弹簧
+    for (const l of links) {
+      const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+      const d = Math.max(1, Math.hypot(dx, dy));
+      const f = (d - 70) * k * Math.min(2, l.w / 5);
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      l.s.vx += fx; l.s.vy += fy;
+      l.t.vx -= fx; l.t.vy -= fy;
+    }
+    // 向心 + 阻尼
+    for (const n of nodes) {
+      n.vx += (st.W / 2 - n.x) * 0.0016;
+      n.vy += (st.H / 2 - n.y) * 0.0016;
+      n.vx *= 0.86; n.vy *= 0.86;
+      if (st.drag === n) { n.vx = 0; n.vy = 0; continue; }
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(20, Math.min(st.W - 20, n.x));
+      n.y = Math.max(20, Math.min(st.H - 20, n.y));
+    }
+  }
+
+  function render() {
+    const st = graphState;
+    if (!st) return;
+    const { ctx, W, H, nodes, links, palette } = st;
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.lineWidth = 0.6;
+    for (const l of links) {
+      const near = st.hover && (l.s === st.hover || l.t === st.hover);
+      ctx.strokeStyle = near ? 'rgba(140,130,255,0.75)' : 'rgba(140,130,255,0.16)';
+      ctx.beginPath();
+      ctx.moveTo(l.s.x, l.s.y);
+      ctx.lineTo(l.t.x, l.t.y);
+      ctx.stroke();
+    }
+
+    for (const n of nodes) {
+      const base = n.type === 'word' ? 3 : 5;
+      const r = base + Math.min(9, Math.sqrt(n.deg) * 1.7) + Math.min(5, n.weight * 0.25);
+      const isHi = n === st.hover || n === st.selected;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = palette[n.type] || '#888';
+      ctx.globalAlpha = isHi ? 1 : 0.82;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      if (isHi) {
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+      }
+    }
+
+    // 只给权重高的节点画标签，避免糊成一片
+    const labeled = nodes.filter(n => n.deg >= 3 || n.weight >= 2).slice(0, 70);
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    for (const n of labeled) {
+      ctx.fillStyle = n === st.hover ? '#fff' : 'rgba(253,252,252,0.55)';
+      ctx.fillText(n.label.slice(0, 16), n.x, n.y - 9 - Math.min(6, n.deg * 0.4));
+    }
+  }
+
+  function loop() {
+    if (!graphState) return;
+    tick();
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // ---- 交互：悬停高亮 + 拖拽
+  function pick(x, y) {
+    const st = graphState;
+    if (!st) return null;
+    let best = null, bestD = 400;
+    for (const n of st.nodes) {
+      const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+  }
+
+  function localPos(e) {
+    const r = canvas.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  }
+
+  canvas.onmousemove = (e) => {
+    const st = graphState;
+    if (!st) return;
+    const [x, y] = localPos(e);
+    if (st.drag) {
+      st.drag.x = x; st.drag.y = y;
+      return;
+    }
+    const hit = pick(x, y);
+    st.hover = hit;
+    canvas.style.cursor = hit ? 'pointer' : 'default';
+    const tip = $('#graphTip');
+    if (hit) {
+      tip.style.display = 'block';
+      tip.style.left = (x + 14) + 'px';
+      tip.style.top = (y + 14) + 'px';
+      const m = hit.meta || {};
+      tip.innerHTML = `<b>${escapeHtml(hit.label)}</b><br>${TYPE_LABEL[hit.type] || hit.type}` +
+        (m.level ? ` · ${escapeHtml(m.level)}` : '') +
+        (m.meaning ? `<br>${escapeHtml(String(m.meaning).slice(0, 80))}` : '') +
+        (m.status ? `<br>状态：${escapeHtml(m.status)}` : '');
+    } else {
+      tip.style.display = 'none';
+    }
+  };
+
+  canvas.onmousedown = (e) => {
+    const st = graphState;
+    if (!st) return;
+    const [x, y] = localPos(e);
+    const hit = pick(x, y);
+    if (hit) { st.drag = hit; st.selected = hit; }
+  };
+
+  window.onmouseup = () => { if (graphState) graphState.drag = null; };
+
+  canvas.onmouseleave = () => {
+    if (graphState) graphState.hover = null;
+    const tip = $('#graphTip');
+    if (tip) tip.style.display = 'none';
+  };
+
+  if (!graphState._looping) {
+    graphState._looping = true;
+    loop();
+  }
+}

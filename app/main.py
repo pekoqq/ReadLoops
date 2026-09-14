@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import articles, reading, stats, words
+from app.api import articles, books, graph, materials, reading, stats, words
 from app.config import WEB_DIR
 
 try:
@@ -21,6 +21,9 @@ app.include_router(articles.router)
 app.include_router(words.router)
 app.include_router(reading.router)
 app.include_router(stats.router)
+app.include_router(books.router)
+app.include_router(materials.router)
+app.include_router(graph.router)
 
 # 静态文件
 app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")

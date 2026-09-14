@@ -40,6 +40,14 @@ WEB_DIR = PACKAGE_DIR / "web"
 DB_PATH = Path(os.getenv("READLOOPS_DB_PATH") or DATA_DIR / "yuedu.db")
 DICT_DB_PATH = DATA_DIR / "ecdict.db"
 
+# 书架：公共领域书籍的本地存放目录（书籍文件较大，单独放，不进版本库）
+LIBRARY_DIR = Path(os.getenv("READLOOPS_LIBRARY_DIR") or DATA_DIR / "library")
+
+# 书架数据源。主源用 Gutenberg 官方（实测稳定）；
+# Gutendex 是第三方镜像，实测时好时坏，仅作可选加速，不作为唯一依赖。
+GUTENBERG_BASE = "https://www.gutenberg.org"
+GUTENBERG_MIRROR = "https://www.gutenberg.org"
+
 # AI 配置（默认 DeepSeek）
 AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.deepseek.com")
 AI_API_KEY = os.getenv("AI_API_KEY", "")
@@ -56,3 +64,4 @@ MAX_NEW_WORDS = 15
 CALIBRATION_ARTICLES = 5
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
