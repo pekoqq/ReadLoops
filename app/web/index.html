@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=40">
+  <link rel="stylesheet" href="/static/css/style.css?v=41">
 </head>
 <body>
   <!-- 液态玻璃 SVG 滤镜（边缘折射效果） -->
@@ -179,6 +179,9 @@
       <div class="right-panel-empty">还没有查词记录<br>选中文字即可查词</div>
     </div>
   </div>
+
+  <!-- 专注聚焦遮罩：四周轻微收暗，把视线收向中央阅读卡（body.focus-mode 时淡入） -->
+  <div class="focus-shade" aria-hidden="true"></div>
 
   <!-- 新手引导：浮动小玻璃箭头，指向右侧查词记录抽屉，触发一次抽屉后消失 -->
   <div class="right-guide-arrow" id="rightGuideArrow" aria-hidden="true">

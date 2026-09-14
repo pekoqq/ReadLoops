@@ -51,6 +51,8 @@
      玻璃会显得很平；加入极淡光斑后，模糊才产生真正的层次感。 */
   --ambient-1: rgba(140,130,255,0.07);
   --ambient-2: rgba(255,160,100,0.045);
+  /* 专注模式：四周收暗的暗角色（把视线收向中央阅读卡），各主题单独配浓度 */
+  --focus-shade: rgba(0,0,0,0.42);
 
   /* ===== 按钮设计系统 =====
      全站按钮共用这套 token。之前每个按钮各写各的，
@@ -217,6 +219,7 @@
   --ripple-color: rgba(60,45,20,0.12);
   --ambient-1: rgba(190,150,70,0.12);
   --ambient-2: rgba(130,95,50,0.07);
+  --focus-shade: rgba(58,42,18,0.26);
 }
 
 /* 明亮 — 柔和米白，不刺眼 */
@@ -236,6 +239,7 @@
   --ripple-color: rgba(0,0,0,0.11);
   --ambient-1: rgba(120,140,255,0.08);
   --ambient-2: rgba(255,180,120,0.07);
+  --focus-shade: rgba(35,38,52,0.15);
 }
 
 /* 纯黑 */
@@ -255,6 +259,7 @@
   --ripple-color: rgba(255,255,255,0.08);
   --ambient-1: rgba(140,130,255,0.09);
   --ambient-2: rgba(255,160,100,0.055);
+  --focus-shade: rgba(0,0,0,0.58);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -284,8 +289,9 @@ body::before, body::after {
   height: 64vh;
   z-index: -1; /* 严格压在所有内容之下、body 底色之上的背景光层 */
   pointer-events: none;
-  will-change: transform;
-  transition: transform 0.6s var(--ease-out); /* 退出专注时快速跟手回位 */
+  will-change: transform, filter;
+  filter: brightness(1);
+  transition: transform 0.6s var(--ease-out), filter 0.6s var(--ease-out); /* 退出时跟手回位 */
 }
 body::before {
   background: radial-gradient(closest-side, var(--ambient-1), transparent 72%);
@@ -295,17 +301,40 @@ body::after {
   background: radial-gradient(closest-side, var(--ambient-2), transparent 72%);
   transform: translate(54vw, 58vh); /* 光斑中心≈视口 86% / 90% */
 }
-/* 进入专注：两团光上移到顶部上沿并排，形成自上而下的聚光 */
+/* 进入专注：两团光上移到顶部上沿并排、变亮并微放大，形成自上而下的聚光顶光 */
 body.focus-mode::before {
-  transform: translate(0vw, -36vh);
-  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translate(-2vw, -34vh) scale(1.18);
+  filter: brightness(2.3);
+  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              filter 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 body.focus-mode::after {
-  transform: translate(36vw, -36vh);
-  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translate(34vw, -34vh) scale(1.22);
+  filter: brightness(2.5);
+  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              filter 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @media (prefers-reduced-motion: reduce) {
   body.focus-mode::before, body.focus-mode::after { transition-duration: 0.01s; transition-delay: 0s; }
+}
+
+/* 专注聚焦暗角：中央（阅读卡所在）保持通透，向四周、底部轻微压暗，收束视线。
+   层级：背景光 -1 < 暗角 0 < 应用内容 .app(1)。 */
+.focus-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(118% 82% at 50% 38%, transparent 50%, var(--focus-shade) 100%);
+  transition: opacity 0.6s var(--ease-out);
+}
+body.focus-mode .focus-shade {
+  opacity: 1;
+  transition: opacity 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1); /* 与涟漪、顶光同时落定 */
+}
+@media (prefers-reduced-motion: reduce) {
+  body.focus-mode .focus-shade { transition-duration: 0.01s; transition-delay: 0s; }
 }
 
 /* 主题切换过渡：只在切换的那 420ms 内生效（JS 临时加类），
@@ -324,6 +353,8 @@ body.theme-transition *::after {
 /* 布局 */
 .app {
   display: flex;
+  position: relative;
+  z-index: 1; /* 抬到专注暗角(.focus-shade z:0)与背景光(z:-1)之上 */
   height: 100vh;
   transform: translateZ(0);
   transition: background 0.5s cubic-bezier(0.32, 0.72, 0, 1);
