@@ -1907,7 +1907,8 @@ body.theme-transition *::after {
 .right-guide-arrow {
   position: fixed;
   right: 18px;
-  bottom: 138px;
+  top: 50%;
+  margin-top: -19px; /* 高 38 的一半：垂直居中；transform 留给显隐/退场动画 */
   width: 38px;
   height: 38px;
   z-index: 55; /* 在右边缘触发带(50)之上、抽屉面板(60)之下 */
