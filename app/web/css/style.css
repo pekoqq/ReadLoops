@@ -331,8 +331,12 @@ body.focus-mode::before {
   }
 }
 body.focus-mode::after {
-  opacity: 0; /* 第二团光淡出，顶部只剩一团 */
-  transition: opacity 2.4s 0.3s var(--ease-out);
+  /* 第二团光必须在顶光「达到最亮」之前退干净：
+     顶光在 0.3 + 3×0.38 = 1.44s 最亮，所以这里 0.3s 延迟 + 1.0s 淡出 = 1.3s 结束。
+     之前是 2.4s，导致最亮那一刻右下暖光还剩一大半，
+     把视觉重心整体拽向右下（实测重心 x=669，偏右 29px，看起来就是不居中）。 */
+  opacity: 0;
+  transition: opacity 1s 0.3s var(--ease-out);
 }
 @media (prefers-reduced-motion: reduce) {
   /* 减弱动效：顶光直接跳到「已熄灭」，不做汇聚过程 */
