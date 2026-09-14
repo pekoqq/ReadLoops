@@ -1,7 +1,9 @@
 """单词路由：查词、生词本、批量添加。"""
+import asyncio
 import time
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -42,11 +44,22 @@ class TranslateRequest(BaseModel):
 async def translate(req: TranslateRequest):
     """翻译句子 / 短语。
 
-    划词选中多个单词时走这里 —— 词典查不到整句，
-    以前会直接显示「查询失败」。
+    划词选中多个单词时走这里 —— 词典查不到整句，需要调 AI。
+    AI 调用是同步阻塞的，放到线程池避免卡住事件循环；失败返回 502 与原因，
+    前端据此提示「点击重试」而不是笼统的「翻译失败」。
     """
-    translation = translate_sentence(req.text)
-    return {"text": req.text, "translation": translation, "ok": bool(translation)}
+    text = (req.text or "").strip()
+    if not text:
+        return {"text": "", "translation": "", "ok": False, "error": "选中文本为空"}
+    try:
+        translation = await asyncio.to_thread(translate_sentence, text)
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"text": text, "translation": "", "ok": False,
+                     "error": f"AI 服务暂时不可用：{str(exc)[:160]}"},
+        )
+    return {"text": text, "translation": translation, "ok": bool(translation)}
 
 
 @router.post("/add")

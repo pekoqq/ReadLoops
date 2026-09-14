@@ -251,6 +251,8 @@ function toggleFocusMode() {
     focusStartTime = Date.now();
     $('#focusBtn').textContent = '退出专注';
     $('#focusBtn').classList.add('active');
+    // 进入专注 = 开始沉浸阅读：有文章且计时未跑时同步开始计时
+    if (currentArticle && !timerRunning) startTimer();
     toast('已进入专注模式');
     // 触发水纹扩散引导
     setTimeout(triggerRipple, 300);
@@ -259,6 +261,8 @@ function toggleFocusMode() {
     focusTotalTime += duration;
     $('#focusBtn').textContent = '专注';
     $('#focusBtn').classList.remove('active');
+    // 退出专注 = 暂停阅读：同步暂停计时（再次进入会从当前读数继续）
+    if (timerRunning) pauseTimer();
     const mins = Math.floor(duration / 60);
     const secs = duration % 60;
     toast(`本次专注 ${mins}分${secs}秒`);
@@ -368,11 +372,6 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     toggleFocusMode();
     return;
-  }
-  // Space 暂停/继续计时（不在输入框中时）
-  if (e.key === ' ' && !['INPUT','TEXTAREA'].includes(e.target.tagName)) {
-    e.preventDefault();
-    toggleTimer();
   }
 });
 
@@ -669,7 +668,8 @@ document.addEventListener('mouseup', (e) => {
   if (lookupPanel.contains(e.target)) return;
   const sel = window.getSelection();
   const text = sel.toString().trim();
-  if (!text || text.length > 60 || !/[a-zA-Z]/.test(text)) { hideLookupPanel(); return; }
+  // 上限 280：整句翻译需要容纳 1~2 个完整句子（原 60 稍长一点的句子直接不弹面板）
+  if (!text || text.length > 280 || !/[a-zA-Z]/.test(text)) { hideLookupPanel(); return; }
   if (!$('#reader').contains(sel.anchorNode)) { hideLookupPanel(); return; }
   currentSelection = text;
   showLookupPanel(e.clientX, e.clientY, text);
@@ -688,12 +688,7 @@ async function showLookupPanel(x, y, word) {
   if (/\s/.test(word.trim())) {
     lookupPanel.classList.add('sentence-mode');
     lookupPanel.dataset.wordId = '';
-    try {
-      const res = await api.post('/api/words/translate', { text: word });
-      $('#lpMeaning').textContent = res.translation || '翻译失败';
-    } catch (err) {
-      $('#lpMeaning').textContent = '翻译失败';
-    }
+    requestSentenceTranslate(word);
     return;
   }
   lookupPanel.classList.remove('sentence-mode');
@@ -712,6 +707,34 @@ async function showLookupPanel(x, y, word) {
       if (typeof loadLookupHistory === 'function') loadLookupHistory();
     }
   } catch (err) { $('#lpMeaning').textContent = '查询失败'; }
+}
+// 整句翻译：独立函数，失败时在面板内给出「点击重试」而不是一句死掉的「翻译失败」
+async function requestSentenceTranslate(word) {
+  const meaning = $('#lpMeaning');
+  meaning.textContent = '翻译中...';
+  try {
+    const res = await api.post('/api/words/translate', { text: word });
+    if (res && res.ok && res.translation) {
+      meaning.textContent = res.translation;
+      return;
+    }
+    renderTranslateRetry(word, res && res.error);
+  } catch (err) {
+    renderTranslateRetry(word, String(err));
+  }
+}
+function renderTranslateRetry(word, reason) {
+  if (reason) console.warn('整句翻译失败:', reason);
+  const meaning = $('#lpMeaning');
+  meaning.innerHTML = '';
+  const hint = document.createElement('div');
+  hint.className = 'translate-hint';
+  hint.textContent = '翻译失败（网络或 AI 服务波动）';
+  const btn = document.createElement('button');
+  btn.className = 'translate-retry-btn';
+  btn.textContent = '点击重试';
+  btn.addEventListener('click', () => requestSentenceTranslate(word));
+  meaning.append(hint, btn);
 }
 function hideLookupPanel() { lookupPanel.classList.remove('show'); }
 

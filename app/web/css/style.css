@@ -358,11 +358,26 @@ body.theme-transition *::after {
   height: 20px;
   flex: none;
   display: inline-flex;
+  transition: transform 0.18s var(--ease-out);
 }
 .sidebar-logo svg { width: 100%; height: 100%; display: block; }
 .sidebar-title { transition: letter-spacing 0.25s var(--ease-out); }
-.sidebar-header:hover { opacity: 0.72; }
+.sidebar-header:hover { opacity: 0.85; }
 .sidebar-header:hover .sidebar-title { letter-spacing: 0.11em; }
+/* hover 时循环环顺时针转一圈并轻微放大，点题 ReadLoops；
+   用 animation（而非 transition）避免鼠标离开时整圈倒转 */
+.sidebar-header:hover .sidebar-logo svg {
+  animation: logoCycle 0.85s var(--ease-damped) forwards;
+}
+.sidebar-header:active .sidebar-logo { transform: scale(0.86); }
+@keyframes logoCycle {
+  0%   { transform: rotate(0deg) scale(1); }
+  70%  { transform: rotate(310deg) scale(1.14); }
+  100% { transform: rotate(360deg) scale(1.06); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-header:hover .sidebar-logo svg { animation: none; }
+}
 .sidebar-nav { padding: 8px 10px; flex: 1; overflow-y: auto; }
 .nav-section {
   font-size: 10px;
@@ -729,6 +744,23 @@ body.theme-transition *::after {
 /* 句子翻译模式：整句不该进生词本，隐藏该按钮 */
 .lookup-panel.sentence-mode #lpAdd { display: none; }
 .lookup-panel.sentence-mode { max-width: 380px; }
+/* 整句翻译失败的提示与重试 */
+.lookup-panel .translate-hint { font-size: 12px; color: var(--text-tertiary); margin-bottom: 8px; }
+.lookup-panel .translate-retry-btn {
+  height: var(--btn-h-sm);
+  padding: var(--btn-pad-sm);
+  border-radius: var(--btn-radius);
+  border: 1px solid var(--glass-border-strong);
+  background: var(--glass);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--mono);
+  transition: background 0.2s var(--ease-out), color 0.2s var(--ease-out), transform 0.18s var(--ease-spring);
+}
+.lookup-panel .translate-retry-btn:hover { background: var(--glass-strong); color: var(--text); transform: translateY(-1px); }
+.lookup-panel .translate-retry-btn:active { transform: scale(0.97); }
 .lookup-panel .action-btn {
   height: var(--btn-h-sm);
   padding: var(--btn-pad-sm);

@@ -22,29 +22,49 @@ def _get_settings():
     }
 
 
-def _chat(messages, max_tokens=1500, temperature=0.7):
-    """调用 AI 聊天接口，关闭思考模式。"""
+def _chat(messages, max_tokens=1500, temperature=0.7, retries=2):
+    """调用 AI 聊天接口，关闭思考模式。
+
+    deepseek-flash 等模型偶发：① 网络抖动 / 5xx；② 思考没被关住，正文为空、
+    内容落到 reasoning_content。两类都按可恢复错误处理，最多重试 ``retries`` 次。
+    """
     cfg = _get_settings()
     if not cfg["api_key"]:
         raise ValueError("未配置 API Key")
-    resp = httpx.post(
-        f"{cfg['base_url'].rstrip('/')}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {cfg['api_key']}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": cfg["model"],
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "thinking": {"type": "disabled"},
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    last_exc = None
+    for attempt in range(retries + 1):
+        try:
+            resp = httpx.post(
+                f"{cfg['base_url'].rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {cfg['api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": cfg["model"],
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "thinking": {"type": "disabled"},
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            message = data["choices"][0]["message"]
+            content = (message.get("content") or "").strip()
+            if not content:
+                # 正文为空通常是思考泄漏到 reasoning_content —— 关思考没生效，值得重试
+                reasoning = (message.get("reasoning_content") or "").strip()
+                raise ValueError(f"AI 返回内容为空（reasoning_content {len(reasoning)} 字）")
+            return content
+        except Exception as exc:  # 网络 / HTTP / 空内容都走重试
+            last_exc = exc
+            if attempt < retries:
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            raise
+    raise last_exc
 
 
 def _extract_json(text):
@@ -563,9 +583,5 @@ def translate_sentence(text):
 Return ONLY the translation itself — no explanation, no quotes, no pinyin.
 
 Text: {text}"""
-    try:
-        result = _chat([{"role": "user", "content": prompt}], max_tokens=500, temperature=0.3)
-        return (result or "").strip().strip('"').strip("'")
-    except Exception as e:
-        print(f"翻译失败: {e}")
-        return ""
+    result = _chat([{"role": "user", "content": prompt}], max_tokens=500, temperature=0.3)
+    return (result or "").strip().strip('"').strip("'")
