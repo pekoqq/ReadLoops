@@ -285,8 +285,11 @@ body::before, body::after {
   position: fixed;
   left: 0;
   top: 0;
-  width: 64vw;
-  height: 64vh;
+  /* 刻意做得比视口大：让光斑中心落在视口**之外**，画面里只留一段柔和的弧光。
+     之前是 64vw×64vh，整个圆形都在视口内、边界清晰可见 ——
+     观感就成了「悬着两个球」，很丑。 */
+  width: 120vw;
+  height: 120vh;
   z-index: -1; /* 严格压在所有内容之下、body 底色之上的背景光层 */
   pointer-events: none;
   will-change: transform, filter, opacity;
@@ -296,12 +299,12 @@ body::before, body::after {
               opacity 0.6s var(--ease-out); /* 退出时跟手回位 */
 }
 body::before {
-  background: radial-gradient(closest-side, var(--ambient-1), transparent 72%);
-  transform: translate(-16vw, -22vh); /* 光斑中心≈视口 16% / 10% */
+  background: radial-gradient(closest-side, var(--ambient-1), transparent 78%);
+  transform: translate(-65vw, -65vh); /* 光斑中心在视口左上外侧，只见弧光 */
 }
 body::after {
-  background: radial-gradient(closest-side, var(--ambient-2), transparent 72%);
-  transform: translate(54vw, 58vh); /* 光斑中心≈视口 86% / 90% */
+  background: radial-gradient(closest-side, var(--ambient-2), transparent 78%);
+  transform: translate(45vw, 45vh); /* 光斑中心在视口右下外侧，只见弧光 */
 }
 /* 进入专注：两团光汇聚成顶部一整团（另一团淡出，避免顶部并排两个冷暖异色「球」），
    然后在涟漪扩散的同一时间窗口内**逐渐熄灭** —— 顶光只承担一次「引导」，
@@ -313,15 +316,17 @@ body.focus-mode::before {
 }
 @keyframes focusGlow {
   0% {
-    transform: translate(-16vw, -22vh) scale(1);
+    transform: translate(-65vw, -65vh) scale(1);
     filter: brightness(1);
   }
-  38% {  /* 汇聚到位并达到最亮 */
-    transform: translate(18vw, -38vh) scale(1.7);
+  38% {  /* 汇聚到视口顶部正中并达到最亮。
+            元素放大 1.12 后中心会偏移，translate 需按 50vw - 60vw×1.12 = -17.2vw 校正，
+            否则顶光会偏右（实测曾偏出 92px）。 */
+    transform: translate(-17.2vw, -85vh) scale(1.12);
     filter: brightness(2.6);
   }
   100% { /* 涟漪落定前彻底熄灭 */
-    transform: translate(18vw, -38vh) scale(1.7);
+    transform: translate(-17.2vw, -85vh) scale(1.12);
     filter: brightness(0);
   }
 }
