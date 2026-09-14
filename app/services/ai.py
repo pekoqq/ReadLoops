@@ -368,6 +368,108 @@ Return ONLY valid JSON, no markdown, no explanation:
     }
 
 
+def recognize_batch_vocabulary(raw_text: str) -> dict:
+    """把用户任意粘贴的词汇材料识别成结构化词条。
+
+    AI 是增强层：能识别「word - 中文释义」「含音标的词表」「编号条目」甚至
+    混合的笔记。服务不可用时返回本地解析结果，批量添加不会被 API 配置卡死。
+    """
+    raw_text = (raw_text or "").strip()
+    if not raw_text:
+        return {"items": [], "mode": "local", "warning": "内容为空"}
+    # 防止一次粘贴整本书导致无意义的大模型请求；本地兜底仍会可用。
+    clipped = raw_text[:12000]
+    prompt = f"""Extract English vocabulary entries from the text below.
+
+Each entry may contain an English word or short phrase, Chinese/English meaning,
+part of speech, IPA, and a level. Ignore headings, example sentences, numbering,
+and non-vocabulary noise. Do not invent entries or meanings.
+
+Return ONLY valid JSON in this exact shape:
+{{"items":[{{"word":"lowercase word or phrase","meaning":"concise Chinese meaning or empty string","phonetic":"IPA or empty string","level":"CET4|CET6|other"}}]}}
+
+Rules:
+- Keep only English words or short phrases (1-4 words).
+- Deduplicate case-insensitively.
+- Use CET4 when level is absent.
+- Preserve a user-provided meaning; leave it empty if unknown.
+
+TEXT:
+{clipped}"""
+    try:
+        raw = _chat([{"role": "user", "content": prompt}], max_tokens=1800, temperature=0.1)
+        data = _extract_json(raw) or {}
+        items = _normalize_vocab_items(data.get("items", []))
+        if items:
+            return {"items": items, "mode": "ai", "warning": ""}
+    except Exception as exc:
+        return {
+            "items": _local_vocab_parse(raw_text),
+            "mode": "local",
+            "warning": f"AI 识别暂不可用，已使用本地解析：{str(exc)[:100]}",
+        }
+    return {"items": _local_vocab_parse(raw_text), "mode": "local",
+            "warning": "AI 未识别出有效条目，已使用本地解析"}
+
+
+def _normalize_vocab_items(items) -> list[dict]:
+    """校验 AI 返回，防止模型输出句子、重复项或异常 level 直接进库。"""
+    out, seen = [], set()
+    valid_levels = {"CET4", "CET6", "other"}
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        word = re.sub(r"\s+", " ", str(item.get("word", "")).strip().lower())
+        # 英文词或至多 4 个英文单词组成的短语
+        if not re.fullmatch(r"[a-z][a-z'-]*(?: [a-z][a-z'-]*){0,3}", word):
+            continue
+        if word in seen:
+            continue
+        seen.add(word)
+        level = str(item.get("level", "CET4")).upper()
+        if level not in valid_levels:
+            level = "CET4"
+        out.append({
+            "word": word,
+            "meaning": str(item.get("meaning", "")).strip()[:300],
+            "phonetic": str(item.get("phonetic", "")).strip()[:100],
+            "level": level,
+        })
+    return out[:300]
+
+
+def _local_vocab_parse(text: str) -> list[dict]:
+    """无 API 时的保底解析：宁可少识别，也不把 n./v.、例句等噪声当成词。"""
+    candidates = []
+    # 有换行时每行通常是一条；没有换行则按常见分隔符拆成独立词。
+    lines = text.splitlines() if "\n" in text else re.split(r"[,，;；\s]+", text)
+    pos_re = r"(?:n|v|vi|vt|adj|adv|prep|conj|pron|num|art)\.?"
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^(?:\(?\d+\)?[.、)\s]*)", "", line)
+        # 去掉行首 IPA：/ˈkɒnsɪkwəns/ consequence: 后果
+        line = re.sub(r"^/[^/]+/\s*", "", line)
+        # 首选「词/短语 - 释义」格式
+        dash = re.match(r"^([A-Za-z][A-Za-z' -]{0,60}?)\s*[-–—:：]\s*(.+)$", line)
+        if dash:
+            word = re.sub(r"\s+", " ", dash.group(1)).strip()
+            candidates.append({"word": word, "meaning": dash.group(2).strip()})
+            continue
+        # 无破折号但含中文：取第一个英文词，余下部分作为释义（跳过词性）。
+        if re.search(r"[\u4e00-\u9fff]", line):
+            m = re.match(rf"^([A-Za-z][A-Za-z'-]*)(?:\s+{pos_re})?\s*(.*)$", line, re.I)
+            if m:
+                candidates.append({"word": m.group(1), "meaning": m.group(2).strip(" .;；，,")})
+            continue
+        # 纯英文：只接受单词/短语；排除单个词性缩写。
+        for w in re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", line):
+            if w.lower().rstrip(".") not in {"n", "v", "vi", "vt", "adj", "adv", "prep", "conj", "pron", "num", "art"}:
+                candidates.append({"word": w, "meaning": ""})
+    return _normalize_vocab_items(candidates)
+
+
 def generate_article(target_new_words=10):
     """生成一篇英语短文，严格参考四级真题阅读风格。
     加入去重检测：如果与最近文章太相似，换主题重新生成（最多3次）。

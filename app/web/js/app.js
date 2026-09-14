@@ -1144,11 +1144,13 @@ async function loadVocab() {
     </div>
     <h1>生词本 <span style="font-size:13px;color:var(--text-secondary);font-weight:400;">${words.length} 个词</span></h1>
     <div class="batch-add">
-      <textarea id="batchWords" placeholder="批量添加，每行一个 / 空格 / 逗号分隔&#10;abandon&#10;benefit&#10;consequence"></textarea>
+      <textarea id="batchWords" placeholder="粘贴任意词汇材料：每行一个、带释义、带音标、编号列表都可以&#10;abandon - 放弃，遗弃&#10;benefit n. 好处；v. 受益&#10;consequence /ˈkɒnsɪkwəns/ 后果"></textarea>
       <div class="batch-actions">
-        <button class="toolbar-btn primary" id="batchAddBtn">批量添加</button>
-        <span class="hint">支持换行、空格、逗号分隔</span>
+        <button class="toolbar-btn primary" id="batchAddBtn">AI 识别并预览</button>
+        <button class="toolbar-btn" id="batchQuickAddBtn">直接添加</button>
+        <span class="hint">AI 会识别词条、释义与等级；确认前可编辑</span>
       </div>
+      <div id="batchPreview" class="batch-preview" style="display:none;"></div>
     </div>
     <div class="vocab-toolbar" id="vocabToolbar">
       <label class="select-all-label">
@@ -1241,17 +1243,120 @@ async function loadVocab() {
     });
   }
 
-  // 批量添加
+  // 批量添加：默认走「识别 → 可编辑预览 → 确认」，保留直接添加作为无等待快捷方式。
   $('#batchAddBtn').addEventListener('click', async () => {
     const text = $('#batchWords').value.trim();
     if (!text) { toast('请输入生词'); return; }
-    const ws = text.split(/[\n,，;；\s]+/).filter(w => w.trim() && /[a-zA-Z]/.test(w));
-    if (!ws.length) { toast('没有有效的单词'); return; }
+    const btn = $('#batchAddBtn');
+    btn.disabled = true;
+    btn.textContent = '识别中…';
+    try {
+      const result = await api.post('/api/words/batch-recognize', { text });
+      renderBatchPreview(result);
+    } catch (e) {
+      toast(e.message || '识别失败');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'AI 识别并预览';
+    }
+  });
+
+  $('#batchQuickAddBtn').addEventListener('click', async () => {
+    const text = $('#batchWords').value.trim();
+    if (!text) { toast('请输入生词'); return; }
+    // 直接模式只取纯英文 token，避免把中文释义和词性缩写带入库。
+    const ws = [...new Set((text.match(/\b[a-zA-Z][a-zA-Z'-]*\b/g) || [])
+      .map(w => w.toLowerCase())
+      .filter(w => !['n','v','vi','vt','adj','adv','prep','conj','pron','num','art'].includes(w)))];
+    if (!ws.length) { toast('没有有效的英文词条'); return; }
     const result = await api.post('/api/words/batch-add', { words: ws });
-    toast(`已添加 ${result.added} 个生词`);
+    toast(batchAddSummary(result));
     $('#batchWords').value = '';
     loadVocab();
   });
+
+  function renderBatchPreview(result) {
+    const box = $('#batchPreview');
+    const items = result.items || [];
+    if (!items.length) {
+      box.style.display = 'block';
+      box.innerHTML = `<div class="batch-preview-empty">没有识别到有效英文词条。可尝试每行一个词，或用「单词 - 释义」格式。</div>`;
+      return;
+    }
+    box.style.display = 'block';
+    box.innerHTML = `
+      <div class="batch-preview-head">
+        <span>识别到 <b>${items.length}</b> 个词条</span>
+        <span class="batch-preview-mode">${result.mode === 'ai' ? 'AI 识别' : '本地解析'}</span>
+      </div>
+      ${result.warning ? `<div class="batch-preview-warning">${escapeHtml(result.warning)}</div>` : ''}
+      <div class="batch-preview-list">
+        ${items.map((it, idx) => `
+          <div class="batch-preview-item" data-index="${idx}">
+            <input type="checkbox" class="batch-item-check" checked title="是否加入">
+            <input class="batch-item-word" value="${escapeHtml(it.word)}" aria-label="词条">
+            <input class="batch-item-meaning" value="${escapeHtml(it.meaning || '')}" placeholder="释义（可编辑）" aria-label="释义">
+            <select class="batch-item-level" aria-label="等级">
+              ${['CET4','CET6','other'].map(l => `<option value="${l}" ${it.level === l ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <button class="batch-item-remove" title="移除">×</button>
+          </div>`).join('')}
+      </div>
+      <div class="batch-preview-actions">
+        <label class="batch-preview-select"><input type="checkbox" id="batchPreviewAll" checked> 全选</label>
+        <span class="hint" id="batchPreviewCount">已选 ${items.length} 个</span>
+        <div class="batch-preview-spacer"></div>
+        <button class="toolbar-btn" id="batchPreviewCancel">取消</button>
+        <button class="toolbar-btn primary" id="batchPreviewConfirm">确认加入</button>
+      </div>`;
+
+    const updateCount = () => {
+      const checks = $$('.batch-item-check');
+      const checked = checks.filter(c => c.checked).length;
+      $('#batchPreviewCount').textContent = `已选 ${checked} 个`;
+      $('#batchPreviewAll').checked = checked === checks.length && checks.length > 0;
+    };
+    $$('.batch-item-check').forEach(c => c.addEventListener('change', updateCount));
+    $('#batchPreviewAll').addEventListener('change', e => {
+      $$('.batch-item-check').forEach(c => { c.checked = e.target.checked; });
+      updateCount();
+    });
+    $$('.batch-item-remove').forEach(btn => btn.addEventListener('click', () => {
+      btn.closest('.batch-preview-item').remove();
+      updateCount();
+    }));
+    $('#batchPreviewCancel').addEventListener('click', () => { box.style.display = 'none'; box.innerHTML = ''; });
+    $('#batchPreviewConfirm').addEventListener('click', async () => {
+      const selected = $$('.batch-preview-item').filter(row => row.querySelector('.batch-item-check').checked);
+      const normalized = selected.map(row => ({
+        word: row.querySelector('.batch-item-word').value.trim(),
+        meaning: row.querySelector('.batch-item-meaning').value.trim(),
+        level: row.querySelector('.batch-item-level').value,
+      })).filter(i => i.word);
+      if (!normalized.length) { toast('请至少保留一个词条'); return; }
+      const btn = $('#batchPreviewConfirm');
+      btn.disabled = true;
+      btn.textContent = '加入中…';
+      try {
+        const r = await api.post('/api/words/batch-add', { items: normalized });
+        toast(batchAddSummary(r));
+        $('#batchWords').value = '';
+        loadVocab();
+      } catch (e) {
+        toast(e.message || '批量添加失败');
+        btn.disabled = false;
+        btn.textContent = '确认加入';
+      }
+    });
+  }
+
+  function batchAddSummary(r) {
+    const parts = [];
+    if (r.added) parts.push(`新增 ${r.added}`);
+    if (r.activated) parts.push(`加入学习 ${r.activated}`);
+    if (r.skipped) parts.push(`跳过 ${r.skipped}`);
+    return parts.length ? parts.join(' · ') : '没有可加入的词条';
+  }
 
   // 词条点击展开/折叠
   $$('.vocab-item-main').forEach(el => {

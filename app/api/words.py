@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.services.ai import lookup_word, translate_sentence
+from app.services.ai import lookup_word, recognize_batch_vocabulary, translate_sentence
 
 router = APIRouter(prefix="/api/words", tags=["words"])
 
@@ -18,8 +18,21 @@ class AddWordRequest(BaseModel):
     context: str = ""
 
 
+class BatchWordItem(BaseModel):
+    word: str
+    meaning: str = ""
+    phonetic: str = ""
+    level: str = "CET4"
+
+
 class BatchAddRequest(BaseModel):
-    words: list[str]
+    # 兼容旧前端：words 仍可直接提交；新前端提交带释义/等级的 items。
+    words: list[str] = []
+    items: list[BatchWordItem] = []
+
+
+class BatchRecognizeRequest(BaseModel):
+    text: str
 
 
 @router.get("/lookup/{word}")
@@ -84,25 +97,62 @@ async def add_word(req: AddWordRequest):
     return {"word_id": word_id, "word": req.word, "status": "added"}
 
 
+@router.post("/batch-recognize")
+async def batch_recognize(req: BatchRecognizeRequest):
+    """AI 识别任意格式的批量词汇；AI 不可用时自动降级本地解析。"""
+    if not req.text.strip():
+        return {"items": [], "mode": "local", "warning": "内容为空"}
+    return await asyncio.to_thread(recognize_batch_vocabulary, req.text)
+
+
 @router.post("/batch-add")
 async def batch_add(req: BatchAddRequest):
-    """批量添加单词。"""
+    """确认后批量加入生词本。
+
+    词典中已存在的词并非重复：它们只是本地词典记录，仍应被激活为 learning。
+    因此返回 added（全新）和 activated（已有词典/复习词转入学习）两个计数。
+    """
     now = int(time.time())
-    added = 0
+    raw_items = [i.model_dump() for i in req.items] if req.items else [
+        {"word": w, "meaning": "", "phonetic": "", "level": "CET4"} for w in req.words
+    ]
+    added = activated = skipped = 0
+    seen = set()
+    valid_levels = {"CET4", "CET6", "other"}
     with get_db() as conn:
-        for w in req.words:
-            w = w.strip().lower()
-            if not w or not w.isalpha():
+        for item in raw_items:
+            w = (item.get("word") or "").strip().lower()
+            # 允许短语，但拒绝含数字、标点或过长的噪声行
+            import re
+            if not re.fullmatch(r"[a-z][a-z'-]*(?: [a-z][a-z'-]*){0,3}", w) or w in seen:
+                skipped += 1
                 continue
-            existing = conn.execute("SELECT id FROM words WHERE text = ?", (w,)).fetchone()
-            if not existing:
+            seen.add(w)
+            meaning = (item.get("meaning") or "").strip()[:300]
+            phonetic = (item.get("phonetic") or "").strip()[:100]
+            level = (item.get("level") or "CET4").upper()
+            if level not in valid_levels:
+                level = "CET4"
+
+            existing = conn.execute("SELECT id, status FROM words WHERE text = ?", (w,)).fetchone()
+            if existing:
                 conn.execute(
-                    "INSERT INTO words (lemma, text, type, level, status, created_at, updated_at) "
-                    "VALUES (?, ?, 'word', 'CET4', 'learning', ?, ?)",
-                    (w, w, now, now),
+                    """UPDATE words SET meaning=COALESCE(NULLIF(?, ''), meaning),
+                       phonetic=COALESCE(NULLIF(?, ''), phonetic), level=COALESCE(NULLIF(?, ''), level),
+                       status='learning', updated_at=? WHERE id=?""",
+                    (meaning, phonetic, level, now, existing["id"]),
+                )
+                activated += 1
+            else:
+                conn.execute(
+                    """INSERT INTO words
+                       (lemma, text, type, meaning, phonetic, level, status, created_at, updated_at)
+                       VALUES (?, ?, 'word', ?, ?, ?, 'learning', ?, ?)""",
+                    (w, w, meaning, phonetic, level, now, now),
                 )
                 added += 1
-    return {"added": added, "total": len(req.words)}
+    return {"added": added, "activated": activated, "skipped": skipped,
+            "total": len(raw_items)}
 
 
 @router.get("/vocab")

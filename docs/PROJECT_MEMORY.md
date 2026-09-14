@@ -18,6 +18,7 @@ AI 驱动的英语阅读训练器「ReadLoops」（原名约读 → ReadForge �
 - **风格画像**：`style_profiles` 保存句长、句法复杂度、词汇分布等统计参数；生效画像会作为统计提示进入 `app/services/ai.py::generate_article()`。
 - **图谱**：`graph_nodes` / `graph_edges` 同时服务用户可视化和结构化检索；前端为 canvas 力导向图。
 - **PDF 链路**：`pypdf` 是普通 PDF 的运行时依赖；复杂版式可运行 `bash tools/setup_mineru.sh` 按需安装 MinerU。MinerU 使用 `tools/mineru-env/` 独立 Python 3.13 环境和 `data/mineru-*` 模型状态目录；解析不走其 CLI，而走 `tools/mineru_direct_parse.py` 直连 pipeline 接口。
+- **批量词汇识别**：`POST /api/words/batch-recognize` 调 `ai.py::recognize_batch_vocabulary`，返回结构化 `items`；AI 异常自动回退 `_local_vocab_parse`。前端必须保留「预览可编辑后确认」而不是直接入库。`/batch-add` 的已有词典项要改为 `learning`，不能当重复跳过。
 
 ## ⚠️ 双仓库结构（2026-09-13 起）
 

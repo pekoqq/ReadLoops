@@ -19,6 +19,7 @@
 | 蒸馏 | `app/services/distill.py` | 统计句长、从句密度、TTR、词频/CET 覆盖；生效画像接入文章生成 |
 | 图谱 | `app/services/graph.py`、`app/api/graph.py` | 节点/边幂等重建；Canvas 力导向 UI |
 | MinerU | `tools/setup_mineru.sh`、`tools/mineru_direct_parse.py` | 独立 Python 3.13 环境；**直连 pipeline，勿使用官方 CLI**（CLI 本机任务轮询会 404） |
+| 批量识词 | `app/services/ai.py::recognize_batch_vocabulary`、`app/api/words.py` | AI 结构化识别 + 本地保底；前端预览可编辑、确认后才入库 |
 
 MinerU 模型缓存/状态在 `data/mineru-cache`、`data/mineru-home`，均不进版本库；普通 PDF 由 `pypdf` 处理。
 
