@@ -289,9 +289,11 @@ body::before, body::after {
   height: 64vh;
   z-index: -1; /* 严格压在所有内容之下、body 底色之上的背景光层 */
   pointer-events: none;
-  will-change: transform, filter;
+  will-change: transform, filter, opacity;
   filter: brightness(1);
-  transition: transform 0.6s var(--ease-out), filter 0.6s var(--ease-out); /* 退出时跟手回位 */
+  opacity: 1;
+  transition: transform 0.6s var(--ease-out), filter 0.6s var(--ease-out),
+              opacity 0.6s var(--ease-out); /* 退出时跟手回位 */
 }
 body::before {
   background: radial-gradient(closest-side, var(--ambient-1), transparent 72%);
@@ -301,18 +303,17 @@ body::after {
   background: radial-gradient(closest-side, var(--ambient-2), transparent 72%);
   transform: translate(54vw, 58vh); /* 光斑中心≈视口 86% / 90% */
 }
-/* 进入专注：两团光上移到顶部上沿并排、变亮并微放大，形成自上而下的聚光顶光 */
+/* 进入专注：只留一整团统一的顶光居中铺在上方（放大一圈），另一团对角光淡出，
+   避免顶部出现两个冷暖异色的「球」。延迟 .3s、时长 3s，与水纹涟漪同时落定。 */
 body.focus-mode::before {
-  transform: translate(-2vw, -34vh) scale(1.18);
-  filter: brightness(2.3);
+  transform: translate(18vw, -38vh) scale(1.7);
+  filter: brightness(2.6);
   transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1),
               filter 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 body.focus-mode::after {
-  transform: translate(34vw, -34vh) scale(1.22);
-  filter: brightness(2.5);
-  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              filter 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0; /* 第二团光淡出，顶部只剩一团 */
+  transition: opacity 2.4s 0.3s var(--ease-out);
 }
 @media (prefers-reduced-motion: reduce) {
   body.focus-mode::before, body.focus-mode::after { transition-duration: 0.01s; transition-delay: 0s; }
