@@ -1903,6 +1903,53 @@ body.theme-transition *::after {
 .right-panel.show {
   transform: translateX(0);
 }
+/* 新手引导箭头：指向右侧抽屉的浮动小玻璃圆钮，触发抽屉后由 JS 加 .dismiss 淡出 */
+.right-guide-arrow {
+  position: fixed;
+  right: 18px;
+  bottom: 138px;
+  width: 38px;
+  height: 38px;
+  z-index: 55; /* 在右边缘触发带(50)之上、抽屉面板(60)之下 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--glass-strong);
+  backdrop-filter: var(--glass-liquid-strong);
+  -webkit-backdrop-filter: var(--glass-liquid-strong);
+  border: 1px solid var(--glass-border-strong);
+  box-shadow: var(--glass-inner-shadow), 0 6px 20px rgba(0,0,0,0.25);
+  color: var(--text);
+  opacity: 0;
+  transform: translateX(10px) scale(0.9);
+  transition: opacity 0.4s var(--ease-out), transform 0.45s var(--ease-damped);
+  pointer-events: none;
+}
+.right-guide-arrow svg { width: 20px; height: 20px; }
+.right-guide-arrow.show {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+}
+/* 箭头本体持续向右轻推，提示「右边有东西」；显隐交给外层 transform，互不打架 */
+.right-guide-arrow.show svg {
+  animation: guideNudge 2.2s ease-in-out infinite;
+}
+.right-guide-arrow.dismiss {
+  opacity: 0;
+  transform: translateX(16px) scale(0.8);
+  animation: none;
+}
+.right-guide-arrow.dismiss svg { animation: none; }
+@keyframes guideNudge {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(3px); }
+}
+/* 专注模式追求极简，隐藏引导 */
+.app.focus-mode .right-guide-arrow { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .right-guide-arrow.show svg { animation: none; }
+}
 .right-panel.show .right-panel-header {
   animation: slideInRight 0.4s 0.1s cubic-bezier(0.16, 1, 0.3, 1) both;
 }

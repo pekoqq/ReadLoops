@@ -263,6 +263,8 @@ function toggleFocusMode() {
     $('#focusBtn').classList.remove('active');
     // 退出专注 = 暂停阅读：同步暂停计时（再次进入会从当前读数继续）
     if (timerRunning) pauseTimer();
+    // 已非专注，计时按钮回到「开始（即进入专注）」语义，而不是「继续」
+    $('#timerBtn').textContent = '开始 [空格]';
     const mins = Math.floor(duration / 60);
     const secs = duration % 60;
     toast(`本次专注 ${mins}分${secs}秒`);
@@ -382,6 +384,8 @@ function formatTime(s) {
   return `${m}:${sec}`;
 }
 function startTimer() {
+  // 计时器与专注模式一体：非专注状态下一律不计时（根防线，任何入口都绕不过）
+  if (!focusMode) return;
   if (timerRunning) return;
   timerRunning = true;
   $('#timerBtn').textContent = '暂停 [空格]';
@@ -395,12 +399,22 @@ function pauseTimer() {
   clearInterval(timerInterval);
   $('#timerBtn').textContent = '继续 [空格]';
 }
-$('#timerBtn').addEventListener('click', () => timerRunning ? pauseTimer() : startTimer());
+// 计时与专注一体：非专注时「开始计时」即进入专注模式；已在专注中则只做暂停 / 继续
+function toggleTimerWithFocus() {
+  if (!focusMode) {
+    const view = document.querySelector('.nav-item.active')?.dataset.view;
+    if (view !== 'reader' || !currentArticle) return; // 非阅读页 / 还没文章：不启动
+    toggleFocusMode(); // 进入专注，其进入分支会负责 startTimer
+  } else {
+    timerRunning ? pauseTimer() : startTimer();
+  }
+}
+$('#timerBtn').addEventListener('click', toggleTimerWithFocus);
 
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && !['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) {
     e.preventDefault();
-    timerRunning ? pauseTimer() : startTimer();
+    toggleTimerWithFocus();
   }
   if (e.key === 'Escape') { hideLookupPanel(); closeSettings(); }
 });
@@ -682,7 +696,8 @@ async function showLookupPanel(x, y, word) {
   $('#lpWord').textContent = word;
   $('#lpPhonetic').textContent = '';
   $('#lpMeaning').textContent = '查询中...';
-  if (!timerRunning && currentArticle) startTimer();
+  // 计时由「划词自动进入专注」统一带动（mouseup → tryAutoFocus → 进专注即计时），
+  // 这里不再单独 startTimer，避免出现非专注计时
 
   // 选中多个单词 → 翻译整句；单个单词 → 查词典
   if (/\s/.test(word.trim())) {
@@ -977,9 +992,9 @@ $$('.nav-item').forEach(item => {
         <h2>ReadLoops</h2>
         <p>点击「生成文章」开始阅读训练</p>
         <div class="empty-hints">
-          <span><kbd>空格</kbd>开始 / 暂停计时</span>
+          <span><kbd>空格</kbd>开始专注计时 · 暂停继续</span>
           <span><kbd>选中</kbd>查词 · 选整句翻译</span>
-          <span><kbd>F</kbd>专注模式</span>
+          <span><kbd>F</kbd>切换专注模式</span>
         </div>
       </div>`;
         }
@@ -1210,9 +1225,9 @@ async function loadVocab() {
         <h2>ReadLoops</h2>
         <p>点击「生成文章」开始阅读训练</p>
         <div class="empty-hints">
-          <span><kbd>空格</kbd>开始 / 暂停计时</span>
+          <span><kbd>空格</kbd>开始专注计时 · 暂停继续</span>
           <span><kbd>选中</kbd>查词 · 选整句翻译</span>
-          <span><kbd>F</kbd>专注模式</span>
+          <span><kbd>F</kbd>切换专注模式</span>
         </div>
       </div>`;
       }
@@ -1814,6 +1829,19 @@ const rightPanelTrigger = $('#rightPanelTrigger');
 let panelHoverTimer = null;
 let panelPinned = false; // 工具栏按钮打开时固定显示
 
+// 新手引导箭头：没触发过右侧抽屉才显示，首次把抽屉唤出后永久记住（不再打扰）
+const guideArrow = $('#rightGuideArrow');
+const GUIDE_SEEN_KEY = 'readloops_right_guide_seen';
+if (guideArrow && !localStorage.getItem(GUIDE_SEEN_KEY)) {
+  setTimeout(() => guideArrow.classList.add('show'), 900);
+}
+function dismissGuideArrow() {
+  if (!guideArrow || guideArrow.classList.contains('dismiss')) return;
+  guideArrow.classList.remove('show');
+  guideArrow.classList.add('dismiss');
+  localStorage.setItem(GUIDE_SEEN_KEY, '1');
+}
+
 // 鼠标移入右侧边缘触发（带防抖，避免快速划过误触）
 rightPanelTrigger.addEventListener('mouseenter', () => {
   clearTimeout(panelHoverTimer);
@@ -1821,6 +1849,7 @@ rightPanelTrigger.addEventListener('mouseenter', () => {
     if (!panelPinned) {
       rightPanel.classList.add('show');
       loadLookupHistory();
+      dismissGuideArrow(); // 用户已发现右侧抽屉，引导箭头退场
     }
   }, 120);
 });
@@ -1840,6 +1869,7 @@ rightPanel.addEventListener('mouseleave', () => {
 $('#lookupHistoryBtn').addEventListener('click', () => {
   rightPanel.classList.add('show');
   loadLookupHistory();
+  dismissGuideArrow();
 });
 
 async function loadLookupHistory() {

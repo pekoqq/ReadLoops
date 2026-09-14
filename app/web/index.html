@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=37">
+  <link rel="stylesheet" href="/static/css/style.css?v=38">
 </head>
 <body>
   <!-- 液态玻璃 SVG 滤镜（边缘折射效果） -->
@@ -180,6 +180,11 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=37"></script>
+  <!-- 新手引导：浮动小玻璃箭头，指向右侧查词记录抽屉，触发一次抽屉后消失 -->
+  <div class="right-guide-arrow" id="rightGuideArrow" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+  </div>
+
+  <script src="/static/js/app.js?v=38"></script>
 </body>
 </html>
