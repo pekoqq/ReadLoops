@@ -1,45 +1,22 @@
-# ---- 数据（严禁入库：可能含个人数据与密钥）----
+# 数据
 data/
 *.db
 *.db-wal
 *.db-shm
-*.sqlite
-*.sqlite3
+backups/
 
-# ---- 语料（版权材料，需用户自备）----
-语料库/
-corpus/
-
-# ---- 密钥与本地配置 ----
-.env
-.env.*
-*.key
-secrets*
-
-# ---- Python ----
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-build/
-dist/
-
-# ---- 测试与覆盖率 ----
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# ---- 工具缓存 ----
-.ruff_cache/
-.mypy_cache/
-
-# ---- 系统与编辑器 ----
+# 系统
 .DS_Store
-Thumbs.db
-.idea/
-.vscode/
+__pycache__/
+*.pyc
+.pytest_cache/
 
-# ---- 日志 ----
+# 日志
 *.log
+/tmp/
+
+# 语料库（太大，按需提交）
+语料库/真题/
+
+# MinerU 独立环境（体积大，不入库）
+tools/mineru-env/

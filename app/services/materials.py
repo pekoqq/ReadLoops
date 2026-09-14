@@ -85,24 +85,54 @@ def _parse_epub(path: Path) -> str:
     return "\n\n".join(chunks)
 
 
-def _parse_pdf(path: Path) -> tuple[str, str]:
-    """返回 (正文, 错误说明)。PDF 需要额外依赖，这里做优雅降级。"""
-    # 1) MinerU（面向 RAG 的解析引擎，效果最好，但体积大、需单独安装）
-    try:
-        import mineru  # noqa: F401
-        from mineru.cli.common import do_parse  # 不同版本 API 不同，谨慎调用
+# MinerU 的独立环境：它要求 Python 3.10–3.13 且依赖很重（20GB+），
+# 不能装进项目环境，因此单独建一个 venv，这里用子进程调用。
+MINERU_ENV_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "mineru-env"
+MINERU_BIN = MINERU_ENV_DIR / "bin" / "mineru"
+
+
+def _parse_pdf_with_mineru(path: Path) -> tuple[str, str]:
+    """用独立环境里的 MinerU 解析（扫描件 / 双栏 / 复杂表格效果最好）。"""
+    if not MINERU_BIN.exists():
+        return "", "未安装"
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
         try:
-            out_dir = path.parent / f"{path.stem}_mineru"
-            do_parse(str(path), str(out_dir))
-            md = list(out_dir.glob("*.md"))
-            if md:
-                return md[0].read_text(encoding="utf-8", errors="ignore"), ""
+            # -b pipeline：纯 CPU 后端，不依赖 GPU
+            proc = subprocess.run(
+                [str(MINERU_BIN), "-p", str(path), "-o", tmp, "-b", "pipeline"],
+                capture_output=True, text=True, timeout=900,
+            )
+        except subprocess.TimeoutExpired:
+            return "", "MinerU 解析超时（超过 15 分钟）"
         except Exception as e:
             return "", f"MinerU 调用失败：{e}"
-    except ImportError:
-        pass
 
-    # 2) pypdf（轻量，纯文本 PDF 够用）
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+            return "", "MinerU 解析失败：" + " / ".join(tail)
+
+        mds = sorted(Path(tmp).rglob("*.md"), key=lambda p: p.stat().st_size, reverse=True)
+        if not mds:
+            return "", "MinerU 未产出 Markdown"
+        return mds[0].read_text(encoding="utf-8", errors="ignore"), ""
+
+
+def _parse_pdf(path: Path) -> tuple[str, str]:
+    """返回 (正文, 错误说明)。
+
+    优先级：MinerU（效果好）→ pypdf（轻量）→ 给出可操作的安装提示。
+    任何一步失败都不会静默返回空，而是把原因带出去给用户看。
+    """
+    # 1) MinerU：面向 RAG 的解析引擎，扫描件/复杂版式效果最好
+    text, err = _parse_pdf_with_mineru(path)
+    if text:
+        return text, ""
+    mineru_err = err if err != "未安装" else ""
+
+    # 2) pypdf：轻量，纯文本 PDF 够用
     try:
         from pypdf import PdfReader
         reader = PdfReader(str(path))
@@ -110,16 +140,20 @@ def _parse_pdf(path: Path) -> tuple[str, str]:
         text = "\n\n".join(pages).strip()
         if text:
             return text, ""
-        return "", "PDF 未提取到文本（可能是扫描件，需要 OCR）"
+        fallback_note = "PDF 未提取到文本（可能是扫描件，需要 OCR）"
     except ImportError:
-        pass
+        fallback_note = "未安装 pypdf"
+    except Exception as e:
+        fallback_note = f"pypdf 解析失败：{e}"
 
-    # 3) 都没装 —— 明确告诉用户装什么，而不是静默失败
-    return "", (
-        "解析 PDF 需要额外依赖。请任选其一安装后重试：\n"
-        "  · 轻量：pip install pypdf\n"
-        "  · 扫描件/复杂版式（推荐）：pip install 'mineru[core]'"
+    # 3) 都没成 —— 明确告诉用户装什么，而不是静默失败
+    hint = (
+        "解析 PDF 需要额外依赖：\n"
+        "  · 轻量（纯文本 PDF）：pip install pypdf\n"
+        "  · 扫描件/复杂版式（推荐）：bash tools/setup_mineru.sh"
     )
+    detail = "；".join(x for x in (mineru_err, fallback_note) if x)
+    return "", f"{detail}\n{hint}"
 
 
 PARSERS = {
