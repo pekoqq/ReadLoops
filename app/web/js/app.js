@@ -247,6 +247,8 @@ function toggleFocusMode() {
   }
   focusMode = !focusMode;
   document.querySelector('.app').classList.toggle('focus-mode', focusMode);
+  // body 同步切类：驱动氛围光层上移 / 回位（过渡与水纹涟漪对齐）
+  document.body.classList.toggle('focus-mode', focusMode);
   if (focusMode) {
     focusStartTime = Date.now();
     $('#focusBtn').textContent = '退出专注';

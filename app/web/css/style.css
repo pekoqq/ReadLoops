@@ -270,17 +270,42 @@ body {
   font-size: 13px;
 }
 
-/* 氛围光层：固定在最底层，为毛玻璃提供可折射的内容 */
-body::before {
+/* 氛围光层：两团极淡光斑固定在最底层，为毛玻璃提供可折射内容。
+   拆成两个独立伪元素、用 transform 平移 —— CSS 渐变的圆心坐标无法平滑过渡，
+   只有 transform 能让光源「滑动」。
+   日常：左上冷光 + 右下暖光的对角光；进入专注：两团光平滑上移、在顶部汇聚成顶光。
+   过渡延迟 .3s、持续 3s，与水纹涟漪（setTimeout 300 + rippleWave 3s）同时起落。 */
+body::before, body::after {
   content: '';
   position: fixed;
-  inset: 0;
-  z-index: 0;
+  left: 0;
+  top: 0;
+  width: 64vw;
+  height: 64vh;
+  z-index: -1; /* 严格压在所有内容之下、body 底色之上的背景光层 */
   pointer-events: none;
-  background:
-    radial-gradient(58% 48% at 16% 10%, var(--ambient-1), transparent 68%),
-    radial-gradient(52% 46% at 86% 90%, var(--ambient-2), transparent 70%);
-  transition: background 0.4s ease;
+  will-change: transform;
+  transition: transform 0.6s var(--ease-out); /* 退出专注时快速跟手回位 */
+}
+body::before {
+  background: radial-gradient(closest-side, var(--ambient-1), transparent 72%);
+  transform: translate(-16vw, -22vh); /* 光斑中心≈视口 16% / 10% */
+}
+body::after {
+  background: radial-gradient(closest-side, var(--ambient-2), transparent 72%);
+  transform: translate(54vw, 58vh); /* 光斑中心≈视口 86% / 90% */
+}
+/* 进入专注：两团光上移到顶部上沿并排，形成自上而下的聚光 */
+body.focus-mode::before {
+  transform: translate(0vw, -36vh);
+  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+body.focus-mode::after {
+  transform: translate(36vw, -36vh);
+  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  body.focus-mode::before, body.focus-mode::after { transition-duration: 0.01s; transition-delay: 0s; }
 }
 
 /* 主题切换过渡：只在切换的那 420ms 内生效（JS 临时加类），
