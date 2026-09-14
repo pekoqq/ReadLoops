@@ -104,6 +104,11 @@ def _parse_pdf_with_mineru(path: Path) -> tuple[str, str]:
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME")}
     env.setdefault("MINERU_MODEL_SOURCE", os.getenv("MINERU_MODEL_SOURCE", "modelscope"))
+    # 模型缓存也放在项目 data 目录：避免默认 ~/.modelscope 在受限环境里
+    # 不能原子替换 session 文件，同时数据目录本来就由 .gitignore 排除。
+    mineru_data = Path(__file__).resolve().parent.parent.parent / "data"
+    env.setdefault("MODELSCOPE_CACHE", str(mineru_data / "mineru-cache"))
+    env.setdefault("MODELSCOPE_HOME", str(mineru_data / "mineru-home"))
 
     with tempfile.TemporaryDirectory() as tmp:
         try:

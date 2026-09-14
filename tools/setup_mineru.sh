@@ -96,13 +96,31 @@ fi
 
 # 有些 IDE/Agent 环境会通过 PYTHONPATH 注入 sitecustomize，干扰 pip 的
 # 临时文件清理。安装过程与 MinerU 本身都不需要它，因此显式清空。
-CLEAN_ENV=(env -u PYTHONPATH -u PYTHONSTARTUP -u PYTHONHOME)
+# ModelScope 的缓存与会话文件放入 data/：一是项目数据天然不入库，二是避免
+# 受限环境禁止它在 ~/.modelscope 下原子替换 session 文件。
+MINERU_DATA_DIR="$PROJECT_ROOT/data"
+MODELSCOPE_CACHE_DIR="$MINERU_DATA_DIR/mineru-cache"
+MODELSCOPE_HOME_DIR="$MINERU_DATA_DIR/mineru-home"
+mkdir -p "$MODELSCOPE_CACHE_DIR" "$MODELSCOPE_HOME_DIR/credentials"
+if [ ! -s "$MODELSCOPE_HOME_DIR/credentials/session" ]; then
+  umask 077
+  "$PYTHON_BIN" -c "import uuid; open('$MODELSCOPE_HOME_DIR/credentials/session', 'w').write(uuid.uuid4().hex)"
+fi
+chmod 600 "$MODELSCOPE_HOME_DIR/credentials/session"
+
+CLEAN_ENV=(env -u PYTHONPATH -u PYTHONSTARTUP -u PYTHONHOME
+  "MODELSCOPE_CACHE=$MODELSCOPE_CACHE_DIR"
+  "MODELSCOPE_HOME=$MODELSCOPE_HOME_DIR"
+  "MINERU_MODEL_SOURCE=modelscope")
 
 echo "==> 升级 pip"
 "${CLEAN_ENV[@]}" "$ENV_DIR/bin/pip" install -q --upgrade pip -i "$MIRROR"
 
 echo "==> 安装 mineru[all]（依赖较多，请耐心等待）"
 "${CLEAN_ENV[@]}" "$ENV_DIR/bin/pip" install -U "mineru[all]" -i "$MIRROR"
+
+echo "==> 预下载 pipeline 模型（首次使用不再等待）"
+"${CLEAN_ENV[@]}" "$ENV_DIR/bin/mineru-models-download" --source modelscope --model_type pipeline
 
 # ---- 4. 验证
 echo "==> 验证"
