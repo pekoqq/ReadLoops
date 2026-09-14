@@ -4,21 +4,33 @@
   "description": "AI 驱动的英语阅读训练器",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1a1c",
-  "theme_color": "#1a1a1c",
+  "background_color": "#1a1818",
+  "theme_color": "#1a1818",
   "orientation": "any",
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "maskable"
+      "purpose": "any"
     }
   ]
 }

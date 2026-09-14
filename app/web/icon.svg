@@ -1,14 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ReadLoops">
+  <rect width="512" height="512" rx="104" fill="#1a1818"/>
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#2d2d30"/>
-      <stop offset="100%" style="stop-color:#1a1a1c"/>
+    <linearGradient id="trail" gradientUnits="userSpaceOnUse" x1="382.9" y1="179.8" x2="299.3" y2="114.5">
+      <stop offset="0%" stop-color="#fdfcfc" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#fdfcfc" stop-opacity="0.72"/>
+      <stop offset="100%" stop-color="#fdfcfc" stop-opacity="1"/>
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
-  <g transform="translate(256, 256)">
-    <path d="M -90 -60 A 110 110 0 1 1 -90 60" fill="none" stroke="white" stroke-width="22" stroke-linecap="round" opacity="0.9"/>
-    <polygon points="-90,80 -60,55 -120,55" fill="white" opacity="0.9"/>
-    <path d="M 30 -30 L 30 30 M 30 30 L 70 0" fill="none" stroke="white" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
-  </g>
+  <path d="M 382.86 179.77 A 148 148 0 1 1 299.27 114.47" fill="none" stroke="url(#trail)" stroke-width="38" stroke-linecap="round"/>
+  <path d="M 331.79 124.41 L 291.96 138.37 L 306.58 90.56 Z" fill="#fdfcfc" stroke-linejoin="round"/>
 </svg>

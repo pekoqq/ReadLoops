@@ -1,11 +1,19 @@
-# ReadLoops
+<p align="center">
+  <img src="https://raw.githubusercontent.com/pekoqq/ReadLoops/main/assets/logo.png" width="104" alt="ReadLoops logo">
+</p>
 
-[![PyPI](https://img.shields.io/pypi/v/readloops)](https://pypi.org/project/readloops/)
-[![Python versions](https://img.shields.io/pypi/pyversions/readloops)](https://pypi.org/project/readloops/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/pekoqq/ReadLoops)](https://github.com/pekoqq/ReadLoops/releases)
+<h1 align="center">ReadLoops</h1>
 
-> AI 驱动的英语阅读训练器。基于「可理解输入（i+1）」+ 阅读驱动的 FSRS 间隔重复，面向大学英语四级（进阶六级）。
+<p align="center">
+  <a href="https://pypi.org/project/readloops/"><img alt="PyPI" src="https://img.shields.io/pypi/v/readloops"></a>
+  <a href="https://pypi.org/project/readloops/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/readloops"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
+  <a href="https://github.com/pekoqq/ReadLoops/releases"><img alt="Release" src="https://img.shields.io/github/v/release/pekoqq/ReadLoops"></a>
+</p>
+
+<p align="center">
+  AI 驱动的英语阅读训练器。基于「可理解输入（i+1）」+ 阅读驱动的 FSRS 间隔重复，面向大学英语四级（进阶六级）。
+</p>
 
 ## 它解决什么问题
 

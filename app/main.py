@@ -1,5 +1,6 @@
 """FastAPI 入口。"""
 import re
+from importlib import metadata
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
@@ -8,7 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from app.api import articles, reading, stats, words
 from app.config import WEB_DIR
 
-app = FastAPI(title="ReadLoops", version="2.2.1")
+try:
+    __version__ = metadata.version('readloops')
+except metadata.PackageNotFoundError:  # 源码直接运行、未 pip install 时
+    __version__ = '0.0.0.dev'
+
+app = FastAPI(title="ReadLoops", version=__version__)
 
 # 注册路由
 app.include_router(articles.router)
@@ -53,9 +59,25 @@ async def manifest():
     return FileResponse(str(WEB_DIR / "manifest.json"))
 
 
-@app.get("/icon.svg")
+@app.get("/icon.svg", include_in_schema=False)
 async def icon():
-    return FileResponse(str(WEB_DIR / "icon.svg"))
+    return FileResponse(str(WEB_DIR / "icon.svg"), headers={"Cache-Control": "no-cache"})
+
+
+# favicon / iOS 主屏 / PWA 各尺寸 PNG（与 manifest.json 中的路径对应）
+_ICON_ROUTES = {
+    '/favicon.ico': 'favicon.ico',
+    '/favicon-16.png': 'favicon-16.png',
+    '/favicon-32.png': 'favicon-32.png',
+    '/apple-touch-icon.png': 'apple-touch-icon.png',
+    '/icon-192.png': 'icon-192.png',
+    '/icon-512.png': 'icon-512.png',
+    '/icon-maskable-512.png': 'icon-maskable-512.png',
+}
+for _url, _fname in _ICON_ROUTES.items():
+    def _icon_endpoint(_fname: str = _fname):
+        return FileResponse(str(WEB_DIR / _fname), headers={"Cache-Control": "no-cache"})
+    app.get(_url, include_in_schema=False)(_icon_endpoint)
 
 
 @app.get("/api/health")
