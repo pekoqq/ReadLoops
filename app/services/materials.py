@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import zipfile
@@ -98,12 +99,18 @@ def _parse_pdf_with_mineru(path: Path) -> tuple[str, str]:
     import subprocess
     import tempfile
 
+    # 用干净的环境变量启动：某些运行环境会通过 PYTHONPATH 注入 sitecustomize，
+    # 干扰子进程里的 pip / 文件操作；MinerU 自己也不需要这些变量。
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME")}
+    env.setdefault("MINERU_MODEL_SOURCE", os.getenv("MINERU_MODEL_SOURCE", "modelscope"))
+
     with tempfile.TemporaryDirectory() as tmp:
         try:
             # -b pipeline：纯 CPU 后端，不依赖 GPU
             proc = subprocess.run(
                 [str(MINERU_BIN), "-p", str(path), "-o", tmp, "-b", "pipeline"],
-                capture_output=True, text=True, timeout=900,
+                capture_output=True, text=True, timeout=900, env=env,
             )
         except subprocess.TimeoutExpired:
             return "", "MinerU 解析超时（超过 15 分钟）"

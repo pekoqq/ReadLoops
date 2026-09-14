@@ -8,6 +8,7 @@ import httpx
 from app.config import AI_API_KEY, AI_BASE_URL, AI_MODEL
 from app.database import get_db
 from app.models import Article, Word
+from app.services.distill import profile_prompt_hint
 
 
 def _get_settings():
@@ -270,13 +271,17 @@ def _generate_once(topic, opening, ending, new_words):
 
     words_str = ", ".join(new_words)
     phrases_str = ", ".join(target_phrases) if target_phrases else "high school, years ago, long term, social media"
+    # 用户在「材料」页激活过的风格画像。它只有统计特征（句长/复杂度/词汇分布），
+    # 不含任何原文；没有激活画像时保持现有生成行为不变。
+    active_style_hint = profile_prompt_hint()
+    style_profile_block = f"\n=== ACTIVE PERSONAL STYLE PROFILE ===\n{active_style_hint}\nFollow this profile while still meeting the requirements below.\n" if active_style_hint else ""
 
     prompt = f"""Write a CET-4 style reading passage (~320 words) for a Chinese college student.
 
 Topic: {topic}
 Opening: {opening}
 Ending: {ending}
-
+{style_profile_block}
 === STYLE REQUIREMENTS (based on analysis of 205 real CET-4 passages) ===
 
 TEXT LENGTH & SENTENCES:
