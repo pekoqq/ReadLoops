@@ -1,4 +1,4 @@
-# ReadLoops — 变更日志
+# 约读阅读器 — 变更日志
 
 ## [2.3.1] - 2026-09-14（专注计时联动 + 整句翻译健壮性 + logo 交互）
 
@@ -21,63 +21,107 @@
 - **专注氛围光上移**：氛围光层由单元素双渐变重构为 `body::before/::after` 两个可 `transform` 平移的光斑（渐变圆心无法插值，只有 transform 能让光源滑动）；日常保持左上冷光/右下暖光的对角光且浓度不变，进入专注时两团光用 3s、延迟 0.3s 的缓动平滑上移、在顶部汇聚成顶光，**与水纹涟漪（延迟 300ms + 时长 3s）同时开始、同时落定**，退出时 0.6s 跟手回位；光层 z-index 修正为 -1 严格压在内容之下
 - **专注态质感分层（日常含蓄 / 专注聚焦）**：进入专注时只保留**一整团居中、放大一圈的统一顶光**（`::before` 移到水平正中、scale 1.7、brightness 2.6；另一团对角光 `::after` 淡出，避免顶部并排两个冷暖异色「球」）；新增 `.focus-shade` 聚焦暗角层（中央阅读卡处通透、向四周/底部轻微压暗，把视线收向文字），暗角浓度用新 token `--focus-shade` 按四主题分别标定（深色 .42 / 纯黑 .58 / 纸质 .26 / 明亮 .15，浅主题不发脏）；`.app` 抬到 z-index:1 形成「底色 < 背景光(-1) < 暗角(0) < 内容(1)」的清晰层级；顶光增亮与暗角淡入同为 3s 延迟 .3s，与涟漪一起落定，退出 .6s 回位
 - **侧边栏 logo 鼠标交互**：hover 时循环环 0.85s 顺时针转一圈并轻微放大（复用 `--ease-damped`，用 animation 避免离开时整圈倒转），按下 `:active` 回弹到 0.86；新增 `prefers-reduced-motion` 兜底。单色 currentColor 不变，四主题一致
+- **知识库工作台**：侧边栏新增「书架 / 材料 / 知识图谱」；书架可搜索并下载 Project Gutenberg 公版书，材料支持粘贴、TXT、Markdown、EPUB、PDF 导入；材料可蒸馏为句长、复合句、词汇分布等风格画像并接入文章生成；图谱提供词、短语、文章、材料之间的力导向可视化、类型筛选、悬停详情和节点拖拽
+- **PDF 解析链路**：普通文本 PDF 使用 `pypdf`；复杂版式走按需安装的 MinerU 独立环境。为避开 MinerU 3.4.5 的本地 CLI 状态轮询问题，改为直接调用其 pipeline Python 接口，已验证可以输出 Markdown
 
-## [2.3.0] - 2026-09-14（UI/动效打磨 + 划词整句翻译）
+## [2.3.0] - 2026-09-14（UI/动效打磨 + 划词翻译）
 
 ### 新增
-- **划词翻译整句**：选中多个单词时调用 AI 翻译整段选中文本（新增 `POST /api/words/translate` 与 `ai.py::translate_sentence`）；选中单个单词仍走本地 ECDICT 词典，句子模式下隐藏「加入生词本」
-- **侧边栏 logo 链接**：点击项目名可跳转项目主页
-- **空状态快捷键提示**：空列表中展示 `空格` / `选中` / `F` 键位提示
+- **划词翻译整句**：选中多个单词 → AI 翻译（新增 `POST /api/words/translate` 与 `ai.py::translate_sentence`）；单个单词仍走本地词典。句子模式下隐藏「加入生词本」
+- **侧边栏 logo 跳转项目主页**：`.sidebar-header` 改为 `<a id="projectHomeLink">`，地址已填为 `https://github.com/pekoqq/ReadLoops`（2026-09-14）
+- **空状态快捷键提示**：加入 `空格` / `选中` / `F` 三个 `<kbd>` 提示
+- **开源发布**：GitHub https://github.com/pekoqq/ReadLoops（Public，Release v2.3.0，CI 三平台全绿）；PyPI https://pypi.org/project/readloops/（2026-09-14，`pip install readloops`，已干净 venv 端到端验证；账号 Fangyuan2711，2FA 已启用）
+- **品牌 logo 重设计（2026-09-14）**：定稿「明度轨迹记忆循环环」（暗淡起点→明亮箭头，渐变仅用于带底徽标）；新增全套图标 favicon 16/32、favicon.ico、apple-touch-icon 180、PWA 192/512、maskable 512；侧边栏标题加 currentColor 单色 logo（四主题自动适配，整块可点跳 GitHub）；manifest 补 PNG icons；main.py 补图标路由并把硬编码版本号改为读包元数据；README 居中 logo+徽章；公开库 `assets/logo.png`、`assets/social-preview.png`（1280×640 仓库头图，需在 GitHub 仓库设置手动上传）。**注意：PyPI 2.3.0 已上传不可覆盖，本次品牌改动不重发，随下一版本发布**
 
-### 重构 — 设计 token 体系
-- **按钮系统**：`:root` 新增 `--btn-*` 尺寸/圆角/内边距 token；`.toolbar-btn` 成为全站共享基类（`.primary` / `.danger` / `.icon` / `.large`），计时按钮、查词面板按钮统一跟随；合并此前两套不同的删除按钮设计；移除「整颗按钮反色」的 hover 反馈
-- **动效系统**：`:root` 新增 `--page-*` / `--enter-*` / `--ease-*` token；新增 `staggerIn(selector, step, max)` 作为成组元素错峰入场的统一入口
-- **玻璃质感统一**：提高表面亮度（纯色背景下 `backdrop-filter` 没有可折射的内容），新增 `body::before` 氛围光层（随主题切换配色）；设置弹窗、删除确认框、输入框由实色统一为玻璃
+### 重构 — 建立设计 token 体系
+- **按钮系统**：`:root` 新增 `--btn-h` / `--btn-h-sm` / `--btn-radius`(999px) / `--btn-radius-sq`(9px) / `--btn-pad`；`.toolbar-btn` 成为**共享基类**（`.primary` / `.danger` / `.icon` / `.large`），`.timer-btn`、`.lookup-panel .action-btn` 跟随
+- **动效系统**：`:root` 新增 `--page-out` / `--page-in` / `--enter-dur` / `--enter-shift` / `--enter-stagger` / `--ease-damped`
+- **`staggerIn(selector, step, max)`**（`app.js`）：成组元素错峰入场的统一入口
 
 ### 修复
-- **页面切换残影（两个根因）**：
-  1. `switchPage` 调用的渲染函数为 async 但未 `await`，旧内容先淡回、数据到达后才被替换 → 改为 `async` + `await`
-  2. 淡出使用 `transition`，移除类时浏览器反向补间，与淡入动画冲突 → 两段统一改用 `animation`
-- **自动专注模式回归**：非阅读页点击会消耗一次性触发机会 → 增加视图判断
-- **计时栏在非阅读页也显示** → 改为仅阅读视图显示
-- **统计热力图入场「炸开」**：188 个格子各自播放缩放动画 → 改为容器整块淡入
-- 清理两套互相覆盖的错峰逻辑，以及 `renderArticleDetail` 中 `return` 之后的死代码
-- 右侧边缘提示条过淡、专注模式顶部无提示 → 改为常驻呼吸提示
-- **Windows 控制台中文输出崩溃**：默认代码页（cp1252 等）无法编码中文，`readloops --help/init/doctor` 直接 UnicodeEncodeError → CLI 入口统一把标准流重配置为 UTF-8，并加回归测试与 CI 双保险（`PYTHONIOENCODING`）
+- **按钮不统一**：圆角曾有 4/8/20px 三套；计时按钮、删除按钮、侧边栏下拉框**完全没有玻璃**；hover 有四种语言（上浮/横移/整体反色/只变色）。两个删除按钮甚至是**两套完全不同的设计** → 全部收敛到基类
+- **浮层是实色**：设置弹窗、删除确认框、侧边栏输入框均无玻璃 → 统一为玻璃
+- **玻璃质感平淡**：深色主题 `--glass` 原为 `rgba(32,29,29,0.45)`（比背景只亮一丁点）；且**纯色背景下 `backdrop-filter` 无从发挥** → 提高表面亮度 + 新增 `body::before` 氛围光层（四主题各配 `--ambient-1/2`）
+- **按钮玻璃被误降级**：从 `--glass-liquid`（SVG 折射）改成了普通模糊 → 已恢复
+- **自动专注模式失效（回归）**：`tryAutoFocus()` 挂在 `#readerContainer` 上，但生词本/统计页内容也渲染在该容器内，点击会**消耗掉一次性触发机会** → 加视图判断，非阅读页 return 且不消耗标志
+- **计时栏在非阅读页也显示**（统计页里很突兀）→ 与专注按钮一起，仅在 `reader` 视图显示
+- **页面切换残影（两层原因）**：
+  1. `switchPage` 调用的渲染函数是 **async 但未 await** → 旧内容先淡回来，数据到了才被换掉 → 改 `async` + `await`
+  2. `#reader.page-fading` 用 `transition`，移除类时浏览器**反向补间**一次，与淡入动画打架 → 两段都改 `animation`
+- **热力图「炸开」**：188 个格子同时播放 `scaleIn` → 改为**容器整块淡入**，格子不再动画
+- **两套错峰逻辑互相覆盖**：`loadVocab` 末尾的手写循环覆盖了 `staggerIn`；`renderArticleDetail` 有一段写在 `return` 之后（**死代码**）→ 均已删除
+- **右侧边缘提示条太淡**、**专注模式顶部无提示**（原 `opacity: 0`，只在 hover 出现）→ 均改为常驻呼吸
+- **Windows 控制台中文输出崩溃**（开源 CI 发现）：默认代码页 cp1252 无法编码中文，`readloops --help/init/doctor` 直接 UnicodeEncodeError → CLI 入口 `_force_utf8_io()` 统一重配置标准流为 UTF-8，加回归测试与 CI 双保险
 
-### 动效
-- 容器 `#reader` 只做 opacity、不做位移，位移仅留给内容层（避免容器位移造成整页「跳动」）
-- 页面离开 0.10s / 进入 0.52s；内容入场 0.78s + 14px 位移 + 0.055s 错峰
-- 新增 `--ease-damped: cubic-bezier(0.34, 1.28, 0.42, 1)`，带回弹的阻尼缓动
-- 主题切换改为 400ms 颜色过渡，不再硬切
+### 动效参数（多轮迭代后的最终值，已经用户确认定稿 2026-09-14，评价「还可以」）
+- 容器 `#reader`：**只做 opacity，绝不位移**（容器一移整页就"跳"）
+- 页面离开 **0.10s**（必须极快，否则旧页面残留被看成残影）/ 进入 **0.52s**
+- 内容入场 **0.78s** + 位移 14px + 错峰 0.055s
+- `--ease-damped: cubic-bezier(0.34, 1.28, 0.42, 1)` —— 会过冲再回落的弹簧曲线，是「阻尼感」的来源
+- 主题切换：临时加 `.theme-transition` 类，全局 400ms 颜色过渡（不再硬切）
 
 ### 说明
-- 本轮为纯表现层改动；唯一新增后端接口为 `POST /api/words/translate`，无数据库变更
+- 本轮为**纯表现层改动**，未改动接口契约与数据库
+- 唯一新增后端接口：`POST /api/words/translate`
 
-## [2.2.3] - 2026-09-13
+---
+
+## [2.2.4] - 2026-09-13（打包为 macOS 应用）
+
+### 新增
+- `~/Applications/ReadLoops.app`：双击即用，自动起服务 + 以 Chrome 应用模式打开界面（独立窗口、无地址栏）
+- `tools/build_app.sh`：可复现构建脚本（SVG → Chrome 无头渲染 → sips → iconutil → .icns）
+
+### 说明
+- 本应用本质仍是「本地服务 + 浏览器界面」的网页应用；`.app` 把"起服务 + 开浏览器"自动化，使用体验等同普通 Mac 软件
+- 启动器优先走 launchd（持久 + 崩溃自启），失败回退 `nohup`
+
+---
+
+## [2.2.3] - 2026-09-13（修复单词测试 500 + schema 自愈）
 
 ### 修复
-- **`POST /api/words/test/start` 返回 500**：SQL 引用了 `tests` 表不存在的 `user_id` 列
-  - 后果：测试记录创建失败 → `testId` 为 null → **测试成绩不入库**，FSRS 与统计不更新
+- **`POST /api/words/test/start` 返回 500**：SQL 往 `tests` 表插入不存在的 `user_id` 列
+  - 后果：前端虽吞掉错误，但 `testId` 为 null → **测试成绩永不入库**，FSRS 与统计全部不更新
   - 修复：SQL 对齐为 `INSERT INTO tests (type, status, created_at)`
-- **`tests` 表 schema 漂移**：真实库缺 `status` / `total` / `completed_at`，导致 `stats.py` 的测试接口同样 500
-  - 修复：`init_db()` 新增 `_ensure_columns()`，启动时**幂等补齐缺失列**，从机制上杜绝此类漂移
+- **`tests` 表 schema 漂移**：`database.py` SCHEMA / 真实数据库 / 代码用法三份定义不一致
+  - 真实库缺 `status`、`total`、`completed_at`（导致 `stats.py` 的测试接口同样会 500）
+  - 修复：`init_db()` 新增 `_ensure_columns()`，启动时幂等补齐缺失列
 
 ### 新增
 - `tests/test_api_endpoints.py`：15 个接口级用例，覆盖全部只读端点与测试记录流程
 - 测试总数 19 → **34**
 
-## [2.2.2] - 2026-09-13（首个开源版本）
+### 数据
+- 迁移前备份至 `backups/`；迁移为纯增量 ALTER TABLE，数据零丢失（integrity_check ok）
+
+---
+
+## [2.2.2] - 2026-09-13（开源拆分 + 安全审计）
+
+### 安全（P0）
+- 审计发现：历史提交 `096ac91` 曾将 `data/yuedu.db`（87MB）入库，内含**真实 API Key**（与当前活跃 key 相同）与个人阅读记录；`65b1380` 后移出工作区，但 blob 仍在历史
+- **复核后修正（2026-09-13）**：私有库无远程仓库、从未推送，密钥**未外泄**；决定**继续使用该 Key**
+- 保护措施：新增 `.git/hooks/pre-push`，默认阻止推送私有库（豁免 `READLOOPS_ALLOW_PUSH=1`）
 
 ### 开源
-- 从私有项目脱敏导出为独立仓库，历史从零，采用 MIT 许可证
-- 剔除个人数据与版权语料，改为「用户自备」并在 README 说明
-- 修复 9 处硬编码绝对路径 → 项目相对路径 + `READLOOPS_*` 环境变量
-- 补齐 `database.py` schema（原缺 `phrases` / `test_questions` 表与 5 个 words 列，全新安装会崩溃）
+- 新建独立公开仓库 `~/readloops/`：历史从零，MIT 许可，终检 0 泄露（`.git` 344K）
+- 剔除：个人数据、版权真题语料、内部文档
+- 新增：LICENSE / README / requirements / CONTRIBUTING（含代码审查清单）/ CODE_OF_CONDUCT / docs/ARCHITECTURE.md
+- 质量基线：ruff + pytest（19 用例）+ pre-commit + GitHub Actions CI
 
-### 工程化
-- 引入 ruff + pytest + pre-commit + GitHub Actions CI
-- 新增 `README.md`、`CONTRIBUTING.md`（含代码审查清单）、`CODE_OF_CONDUCT.md`、`docs/ARCHITECTURE.md`
+### 缺陷修复
+- `app/database.py`：schema 由 8 表补全为 10 表，`words` 补 `srs_interval`/`exchange`/`wrong_count`/`correct_count`/`last_test_at` —— 修复「全新安装缺表缺列必崩」
+- 9 处硬编码 `/Users/wangzhiming/` 绝对路径 → 项目相对路径 + `READLOOPS_*` 环境变量
+- 4 处裸 `except:` → `except Exception:`
+- `tools/import_exchange.py`：删除重复字典键 `'3'`（运行时行为不变）
+
+### 文档校正
+- 技术栈：`py-fsrs` → **自研 FSRS 简化版**（实际仅依赖 time/math）
+- 风格参数：并非运行时加载 `cet4_style_params.json`，而是**硬编码在 `ai.py` 的 prompt 模板中**
+
+### 决策
+- 移动端适配**暂缓**（前置条件：先解决手机远程访问）
 
 ---
 

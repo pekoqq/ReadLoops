@@ -88,13 +88,20 @@ def _parse_epub(path: Path) -> str:
 
 # MinerU 的独立环境：它要求 Python 3.10–3.13 且依赖很重（20GB+），
 # 不能装进项目环境，因此单独建一个 venv，这里用子进程调用。
-MINERU_ENV_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "mineru-env"
-MINERU_BIN = MINERU_ENV_DIR / "bin" / "mineru"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+MINERU_ENV_DIR = PROJECT_ROOT / "tools" / "mineru-env"
+MINERU_PYTHON = MINERU_ENV_DIR / "bin" / "python"
+MINERU_DIRECT_SCRIPT = PROJECT_ROOT / "tools" / "mineru_direct_parse.py"
 
 
 def _parse_pdf_with_mineru(path: Path) -> tuple[str, str]:
-    """用独立环境里的 MinerU 解析（扫描件 / 双栏 / 复杂表格效果最好）。"""
-    if not MINERU_BIN.exists():
+    """用独立环境里的 MinerU 直连 pipeline 解析。
+
+    不调用官方 ``mineru`` CLI：3.4.5 的 CLI 在本机临时 API 服务中会出现
+    「任务已提交但查询状态 404」的编排缺陷。``mineru_direct_parse.py`` 直接调用
+    ``doc_analyze_streaming``，绕过 HTTP 层，已用真实模型验证可输出 Markdown。
+    """
+    if not MINERU_PYTHON.exists() or not MINERU_DIRECT_SCRIPT.exists():
         return "", "未安装"
     import subprocess
     import tempfile
@@ -104,17 +111,18 @@ def _parse_pdf_with_mineru(path: Path) -> tuple[str, str]:
     env = {k: v for k, v in os.environ.items()
            if k not in ("PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME")}
     env.setdefault("MINERU_MODEL_SOURCE", os.getenv("MINERU_MODEL_SOURCE", "modelscope"))
-    # 模型缓存也放在项目 data 目录：避免默认 ~/.modelscope 在受限环境里
-    # 不能原子替换 session 文件，同时数据目录本来就由 .gitignore 排除。
-    mineru_data = Path(__file__).resolve().parent.parent.parent / "data"
+    # 模型缓存与 session 放项目 data 目录：避免受限环境禁止 ~/.modelscope 原子写入。
+    mineru_data = PROJECT_ROOT / "data"
     env.setdefault("MODELSCOPE_CACHE", str(mineru_data / "mineru-cache"))
     env.setdefault("MODELSCOPE_HOME", str(mineru_data / "mineru-home"))
+    env.setdefault("OMP_NUM_THREADS", "1")
+    env.setdefault("MKL_NUM_THREADS", "1")
 
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            # -b pipeline：纯 CPU 后端，不依赖 GPU
             proc = subprocess.run(
-                [str(MINERU_BIN), "-p", str(path), "-o", tmp, "-b", "pipeline"],
+                [str(MINERU_PYTHON), str(MINERU_DIRECT_SCRIPT), str(path), tmp,
+                 "--method", "auto"],
                 capture_output=True, text=True, timeout=900, env=env,
             )
         except subprocess.TimeoutExpired:
@@ -123,7 +131,7 @@ def _parse_pdf_with_mineru(path: Path) -> tuple[str, str]:
             return "", f"MinerU 调用失败：{e}"
 
         if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-4:]
             return "", "MinerU 解析失败：" + " / ".join(tail)
 
         mds = sorted(Path(tmp).rglob("*.md"), key=lambda p: p.stat().st_size, reverse=True)
