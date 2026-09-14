@@ -32,6 +32,10 @@
   --highlight: rgba(253,252,252,0.1);
   --sidebar-w: 220px;
   --reader-w: 720px;
+  /* 顶光要对着「内容区中心」，而不是视口中心：
+     侧边栏展开时，内容区整体右移，其中心比视口中心偏右 --sidebar-w/2。
+     不补偿的话，光晕看着就是偏左的（用户实测反馈）。 */
+  --content-shift: calc(var(--sidebar-w) / 2);
   --font-size: 17px;
   --line-height: 1.75;
   --radius: 8px;
@@ -298,6 +302,11 @@ body::before, body::after {
   transition: transform 0.6s var(--ease-out), filter 0.6s var(--ease-out),
               opacity 0.6s var(--ease-out); /* 退出时跟手回位 */
 }
+/* 侧边栏收起时（自动侧边栏模式）内容区占满视口，不需要偏移补偿。
+   auto-sidebar-mode 挂在 .app 上，body 的伪元素读不到，用 :has() 桥接。 */
+body:has(.app.auto-sidebar-mode) {
+  --content-shift: 0px;
+}
 body::before {
   background: radial-gradient(closest-side, var(--ambient-1), transparent 78%);
   transform: translate(-65vw, -65vh); /* 光斑中心在视口左上外侧，只见弧光 */
@@ -319,14 +328,16 @@ body.focus-mode::before {
     transform: translate(-65vw, -65vh) scale(1);
     filter: brightness(1);
   }
-  38% {  /* 汇聚到视口顶部正中并达到最亮。
-            元素放大 1.12 后中心会偏移，translate 需按 50vw - 60vw×1.12 = -17.2vw 校正，
-            否则顶光会偏右（实测曾偏出 92px）。 */
-    transform: translate(-17.2vw, -85vh) scale(1.12);
+  38% {  /* 汇聚到**内容区**顶部正中并达到最亮。
+            translate 需满足两个校正：
+            ① 元素放大 1.12 后中心偏移 → 50vw - 60vw×1.12 = -17.2vw
+            ② 侧边栏占位 → 再右移 --content-shift（侧边栏收起时为 0）
+            缺 ① 会偏右，缺 ② 会偏左（都是实测踩过的坑）。 */
+    transform: translate(calc(var(--content-shift) - 17.2vw), -85vh) scale(1.12);
     filter: brightness(2.6);
   }
   100% { /* 涟漪落定前彻底熄灭 */
-    transform: translate(-17.2vw, -85vh) scale(1.12);
+    transform: translate(calc(var(--content-shift) - 17.2vw), -85vh) scale(1.12);
     filter: brightness(0);
   }
 }
