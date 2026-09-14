@@ -303,20 +303,36 @@ body::after {
   background: radial-gradient(closest-side, var(--ambient-2), transparent 72%);
   transform: translate(54vw, 58vh); /* 光斑中心≈视口 86% / 90% */
 }
-/* 进入专注：只留一整团统一的顶光居中铺在上方（放大一圈），另一团对角光淡出，
-   避免顶部出现两个冷暖异色的「球」。延迟 .3s、时长 3s，与水纹涟漪同时落定。 */
+/* 进入专注：两团光汇聚成顶部一整团（另一团淡出，避免顶部并排两个冷暖异色「球」），
+   然后在涟漪扩散的同一时间窗口内**逐渐熄灭** —— 顶光只承担一次「引导」，
+   不该长期占据视野。所以用 animation 而非 transition：
+   transition 只能一次性到位，表达不了「先亮起、再灭掉」这段过程。
+   时长/延迟与涟漪（延迟 .3s、时长 3s）严格对齐。 */
 body.focus-mode::before {
-  transform: translate(18vw, -38vh) scale(1.7);
-  filter: brightness(2.6);
-  transition: transform 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1),
-              filter 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: focusGlow 3s 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes focusGlow {
+  0% {
+    transform: translate(-16vw, -22vh) scale(1);
+    filter: brightness(1);
+  }
+  38% {  /* 汇聚到位并达到最亮 */
+    transform: translate(18vw, -38vh) scale(1.7);
+    filter: brightness(2.6);
+  }
+  100% { /* 涟漪落定前彻底熄灭 */
+    transform: translate(18vw, -38vh) scale(1.7);
+    filter: brightness(0);
+  }
 }
 body.focus-mode::after {
   opacity: 0; /* 第二团光淡出，顶部只剩一团 */
   transition: opacity 2.4s 0.3s var(--ease-out);
 }
 @media (prefers-reduced-motion: reduce) {
-  body.focus-mode::before, body.focus-mode::after { transition-duration: 0.01s; transition-delay: 0s; }
+  /* 减弱动效：顶光直接跳到「已熄灭」，不做汇聚过程 */
+  body.focus-mode::before { animation-duration: 0.01s; animation-delay: 0s; }
+  body.focus-mode::after { transition-duration: 0.01s; transition-delay: 0s; }
 }
 
 /* 专注聚焦暗角：中央（阅读卡所在）保持通透，向四周、底部轻微压暗，收束视线。
