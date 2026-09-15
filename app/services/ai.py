@@ -271,35 +271,47 @@ def _generate_once(topic, opening, ending, new_words):
 
     words_str = ", ".join(new_words)
     phrases_str = ", ".join(target_phrases) if target_phrases else "high school, years ago, long term, social media"
-    # 用户在「材料」页激活过的风格画像。它只有统计特征（句长/复杂度/词汇分布），
-    # 不含任何原文；没有激活画像时保持现有生成行为不变。
+    # 用户在「材料」页激活过的风格画像（只有统计特征，不含原文）。
+    #
+    # ⚠️ 这里改过一次定位：原先叫 ACTIVE PERSONAL STYLE PROFILE，并且写着
+    # "Follow this profile while still meeting the requirements below"，
+    # 又排在真题基准**之前** —— 效果是让画像压过基准。而画像来自用户自己的
+    # 材料，可能是一本 19 世纪小说（实测《傲慢与偏见》短句占比 29% vs 四级真题
+    # 10%、平均词长 4.41 vs 4.85），整篇文风会被带偏。
+    # 现在：真题基准是骨架且排在前面，画像只作为「语气微调」出现在最后。
     active_style_hint = profile_prompt_hint()
-    style_profile_block = f"\n=== ACTIVE PERSONAL STYLE PROFILE ===\n{active_style_hint}\nFollow this profile while still meeting the requirements below.\n" if active_style_hint else ""
+    style_profile_block = (
+        "\n=== OPTIONAL REGISTER NOTE (from your own materials) ===\n"
+        f"{active_style_hint}\n"
+        "Treat this as a light touch ONLY. The CET-4 baseline above always wins on "
+        "sentence length, sentence complexity, and vocabulary coverage.\n"
+        if active_style_hint else ""
+    )
 
     prompt = f"""Write a CET-4 style reading passage (~320 words) for a Chinese college student.
 
 Topic: {topic}
 Opening: {opening}
 Ending: {ending}
-{style_profile_block}
-=== STYLE REQUIREMENTS (based on analysis of 205 real CET-4 passages) ===
+
+=== STYLE REQUIREMENTS (measured from 273 real CET-4 passages) ===
 
 TEXT LENGTH & SENTENCES:
 - Target: ~320 words, 15-18 sentences
-- Average sentence length: 20 words (range: 8-35 words)
-- Mix: 18% short sentences (<=10 words), 40% medium (11-20 words), 42% long (>20 words)
-- Use compound sentences (and/but/or/so) in ~50% of sentences
-- Use relative clauses (which/that/who) in ~30% of sentences
-- Use adverbial clauses (because/although/if/when/while) in ~30% of sentences
+- Average sentence length: 19 words (p10 8, median 18, p90 32)
+- Mix: 19% short sentences (<=10 words), 42% medium (11-20 words), 39% long (>20 words)
+- Use compound sentences (and/but/or/so) in ~65% of sentences
+- Use relative clauses (which/that/who) in ~33% of sentences
+- Use adverbial clauses (because/although/if/when/while) in ~17% of sentences
 - Include at least 2 long complex sentences (>25 words) with nested clauses
 
 TOP CONJUNCTIONS TO USE NATURALLY:
 and, that, as, but, or, when, who, if, so, which, because, while
 
 VOCABULARY:
-- Average word length: 4.8 letters
+- Average word length: 4.9 letters
 - Use common CET-4 level words
-- Top content words in real passages: people, time, new, work, students, food, study, research, school, women, life, way
+- Top content words in real passages: more, people, time, new, work, says, like, said, also, other, research, study
 - Common phrases: high school, years ago, long term, young people, social media, climate change, work life, health care
 
 WORD FAMILIES (use these word forms naturally in context, not just the base word):
@@ -339,6 +351,7 @@ ABSOLUTELY FORBIDDEN:
 === TARGET WORDS ===
 Naturally include these words in context (do NOT force them, do NOT list them): {words_str}
 Use each target word at least once.
+{style_profile_block}
 
 Return ONLY valid JSON, no markdown, no explanation:
 {{"title": "A concise title (5-8 words, title case)", "content": "The full passage (~320 words)", "new_words": ["word1", "word2"]}}"""
@@ -574,6 +587,11 @@ def generate_article(target_new_words=10):
         title=title,
         content=content,
         word_count=word_count,
+        # ⚠️ 必须带上 target_words：Article 的默认值是 "[]"，
+        # 漏掉它会让调用方（API 响应、重遇记录）都拿到空列表 ——
+        # 于是「文章里埋了哪些目标生词」这条信息在生成之后就丢了，
+        # 重遇机制只能统计到正文里偶然出现的旧词。
+        target_words=json.dumps(article_words, ensure_ascii=False),
         new_word_count=len(article_words),
         created_at=now,
     )

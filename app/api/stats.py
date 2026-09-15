@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.database import get_db
+from app.services import encounter
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
@@ -96,6 +97,7 @@ async def stats_overview():
         "vocab_estimate": vocab_estimate,
         "test_accuracy": round(test_correct / test_total * 100, 1) if test_total > 0 else 0,
         "srs": srs,
+        "reentry": encounter.summary(),
         "hot_words": [{"text": r["text"], "count": r["lookup_count"]} for r in hot_words],
     }
 
@@ -252,3 +254,17 @@ async def test_api_connection(req: TestApiRequest):
             return {"ok": False, "error": f"HTTP {resp2.status_code}: {resp2.text[:100]}"}
     except Exception as e:
         return {"ok": False, "error": str(e)[:100]}
+
+
+@router.get("/stats/reentry")
+def reentry(limit: int = 200, only_active: bool = True):
+    """重遇进度：每个学习词跨了多少篇文章。
+
+    口径是「跨多少篇」而不是「见了几次」—— 方法要求的是**变化的语境**，
+    同一篇文章里看 12 遍没有意义。
+    """
+    return {
+        "summary": encounter.summary(),
+        "items": encounter.reentry_stats(limit=max(1, min(limit, 1000)),
+                                         only_active=only_active),
+    }

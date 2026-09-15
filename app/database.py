@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS words (
     wrong_count INTEGER DEFAULT 0,
     correct_count INTEGER DEFAULT 0,
     last_test_at INTEGER,
+    -- 来自 ECDICT 的考试标签与词频（tools/import_exam_tags.py 导入）：
+    -- 词汇差距统计需要知道「哪些词属于哪场考试」，以及「这个词有多常用」。
+    tags TEXT,                        -- 空格分隔：cet4 cet6 ky ielts toefl gre gk zk
+    frq INTEGER DEFAULT 0,            -- COCA 词频排名（0 = 不在表）；越小越高频
+    bnc INTEGER DEFAULT 0,            -- BNC 词频排名
+    collins INTEGER,                  -- 柯林斯星级 1–5
+    oxford INTEGER DEFAULT 0,         -- 是否牛津核心 3000 词
+    mastered INTEGER DEFAULT 0,       -- 0=未测 / 1=掌握 / 2=未掌握（定级测试与 FSRS 维护）
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -203,6 +211,7 @@ CREATE TABLE IF NOT EXISTS graph_edges (
 
 CREATE INDEX IF NOT EXISTS idx_words_status ON words(status);
 CREATE INDEX IF NOT EXISTS idx_words_level ON words(level);
+CREATE INDEX IF NOT EXISTS idx_words_text ON words(text);
 CREATE INDEX IF NOT EXISTS idx_phrases_level ON phrases(level);
 CREATE INDEX IF NOT EXISTS idx_test_questions_test_id ON test_questions(test_id);
 CREATE INDEX IF NOT EXISTS idx_test_questions_word_id ON test_questions(word_id);
@@ -212,6 +221,39 @@ CREATE INDEX IF NOT EXISTS idx_style_profiles_active ON style_profiles(is_active
 CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(node_type);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_id);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id);
+
+-- ========== 定级测试：词汇量的初始标定 ==========
+-- 没有它，覆盖率 / 考试缺口 / i+1 选词都没有起点（新用户只有
+-- 「2000 + 学过的几个词」这种无意义的数字）。
+CREATE TABLE IF NOT EXISTS placement_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vocab_estimate INTEGER NOT NULL,
+    is_lower_bound INTEGER DEFAULT 0,   -- 最高档也掌握得很好 → 估计值只是下界
+    false_alarm REAL DEFAULT 0,         -- 伪词虚报率（自评高估的校正项）
+    answered INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
+-- 逐档掌握率：覆盖率计算靠它按词频档位给语料加权
+CREATE TABLE IF NOT EXISTS placement_bands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    band_lo INTEGER NOT NULL,
+    band_hi INTEGER NOT NULL,
+    band_size INTEGER NOT NULL,
+    sampled INTEGER NOT NULL,
+    known INTEGER NOT NULL,
+    rate REAL NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES placement_runs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_placement_bands_run ON placement_bands(run_id);
+
+-- 「遇见」记录幂等：同一篇文章对同一个词只记一次。
+-- 用部分唯一索引而不是普通唯一索引，是因为 action='lookup' 的查词记录
+-- 本来就是一次一条（同一篇里查两次应当记两次），不能被去重。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_encounters_seen
+    ON word_encounters(word_id, article_id) WHERE action = 'seen';
 """
 
 DEFAULT_SETTINGS = {
@@ -234,6 +276,12 @@ COLUMN_MIGRATIONS = {
         "correct_count": "INTEGER DEFAULT 0",
         "last_test_at": "INTEGER",
         "srs_interval": "REAL DEFAULT 0",
+        "tags": "TEXT",
+        "frq": "INTEGER DEFAULT 0",
+        "bnc": "INTEGER DEFAULT 0",
+        "collins": "INTEGER",
+        "oxford": "INTEGER DEFAULT 0",
+        "mastered": "INTEGER DEFAULT 0",
     },
     "tests": {
         "status": "TEXT DEFAULT 'in_progress'",
@@ -250,6 +298,14 @@ def _ensure_columns(conn):
         for name, decl in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+# 建在「迁移新增列」上的索引，必须在 _ensure_columns() 之后执行 ——
+# 否则首次升级旧库时，列还没补齐就建索引会报 "no such column"。
+POST_MIGRATION_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_words_frq ON words(frq);
+CREATE INDEX IF NOT EXISTS idx_words_mastered ON words(mastered);
+"""
 
 
 def _dedupe_books(conn):
@@ -275,6 +331,7 @@ def init_db():
     with get_db() as conn:
         conn.executescript(SCHEMA)
         _ensure_columns(conn)
+        conn.executescript(POST_MIGRATION_INDEXES)
         _dedupe_books(conn)
         # 默认用户
         conn.execute("INSERT OR IGNORE INTO users (id, name, created_at) VALUES (1, '用户1', ?)", (now,))

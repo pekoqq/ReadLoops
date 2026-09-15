@@ -2904,3 +2904,113 @@ body.theme-transition *::after {
 @media (prefers-reduced-motion: reduce) {
   .kb-card, .graph-stage { animation-duration: 0.01s; }
 }
+
+/* ---- 词汇量定级 ---- */
+/* .meter-* 是通用条形计量组件：定级分档图与重遇进度共用 */
+.placement-entry {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 18px; margin-bottom: 18px;
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inner-shadow);
+  cursor: pointer;
+  transition: transform var(--page-out) var(--ease-out), border-color var(--page-out) var(--ease-out);
+}
+.placement-entry:hover { transform: translateY(-2px); border-color: var(--text-tertiary); }
+.placement-entry.pending { border-color: var(--accent); }
+.placement-entry-main { flex: 1; min-width: 0; }
+.placement-entry-title { font-size: 14px; color: var(--text); margin-bottom: 4px; }
+.placement-entry-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.6; }
+
+.placement-intro { max-width: 620px; }
+.placement-howto { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+.placement-step { display: flex; gap: 12px; align-items: baseline; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+.placement-step b {
+  flex: 0 0 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--glass-strong); border: 1px solid var(--glass-border-strong);
+  color: var(--text); font-size: 11px; font-weight: 500;
+}
+.placement-step span b, .kb-sub b { display: inline; flex: none; height: auto; width: auto;
+  border: none; background: none; border-radius: 0; color: var(--text); font-weight: 500; }
+.placement-warn {
+  padding: 12px 14px; margin-bottom: 20px; font-size: 12px; line-height: 1.7;
+  color: var(--text-secondary); border-left: 2px solid var(--accent);
+  background: var(--glass); border-radius: var(--radius);
+}
+.placement-actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+
+.placement-progress { margin: 18px 0 10px; }
+.placement-progress-bar {
+  height: 3px; border-radius: 2px; overflow: hidden;
+  background: var(--glass-strong); border: 1px solid var(--glass-border);
+}
+.placement-progress-bar span {
+  display: block; height: 100%; background: var(--accent);
+  transition: width var(--page-in) var(--ease-damped);
+}
+.placement-progress-text { margin-top: 8px; font-size: 11px; color: var(--text-tertiary); }
+.placement-hint { margin: 16px 0 12px; font-size: 12px; color: var(--text-secondary); }
+
+.placement-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px; margin-bottom: 20px;
+}
+.placement-word {
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 13px; border-radius: var(--radius);
+  border: 1px solid var(--glass-border);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  cursor: pointer; user-select: none;
+  font-size: 13px; color: var(--text-secondary);
+  transition: border-color var(--page-out) var(--ease-out), background var(--page-out) var(--ease-out);
+}
+.placement-word:hover { border-color: var(--glass-border-strong); }
+.placement-word.known { border-color: var(--accent); color: var(--text); background: var(--glass-strong); }
+.placement-word input { display: none; }
+.placement-word span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.placement-nav { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.placement-tip { font-size: 11px; color: var(--text-tertiary); }
+
+.placement-result { max-width: 720px; }
+.placement-score {
+  padding: 26px 24px; margin: 18px 0 24px;
+  border: 1px solid var(--glass-border-strong); border-radius: var(--radius-lg);
+  background: var(--glass); backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inner-shadow);
+}
+.placement-score-num { font-size: 42px; line-height: 1.1; color: var(--text); }
+.placement-score-label { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+.placement-score-meta { margin-top: 14px; font-size: 11px; color: var(--text-tertiary); line-height: 1.8; }
+.placement-note { color: var(--text-tertiary); opacity: 0.75; }
+
+.meter-title { font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; }
+.meter-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+.meter-label { flex: 0 0 32px; font-size: 10px; color: var(--text-tertiary); text-align: right; }
+.meter-track {
+  flex: 1; height: 12px; border-radius: 3px; overflow: hidden;
+  background: var(--glass); border: 1px solid var(--glass-border);
+}
+.meter-fill {
+  display: block; height: 100%; background: var(--accent); opacity: 0.75;
+  animation: enterFade var(--enter-dur) var(--ease-damped) both;
+}
+.meter-val { flex: 0 0 38px; font-size: 10px; color: var(--text-secondary); }
+.reentry-note { font-size: 11px; color: var(--text-tertiary); line-height: 1.8; margin-bottom: 12px; }
+.reentry-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;
+}
+.reentry-avg { font-size: 11px; color: var(--text-tertiary); }
+.reentry-word { flex: 0 0 96px; text-align: left; font-size: 11px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 重遇列表在宽布局下会被拉得很长，收窄到易读宽度 */
+.reentry-note, .reentry-head, .reentry-list { max-width: 620px; }
+.reentry-list .meter-row { margin-bottom: 5px; }

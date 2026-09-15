@@ -17,11 +17,15 @@ __pycache__/
 
 # 语料库（太大，按需提交）
 语料库/真题/
+# 爬取的四六级真题正文：1.5MB、可由 tools/crawl_exam_corpus.py 在 6 分钟内重建，
+# 没有必要入库，也彻底断掉「被 cp 到公开库」的风险。
+语料库/真题阅读纯文本/exam_corpus.json
+语料库/真题阅读纯文本/exam_corpus.txt
 
 # MinerU 独立环境（体积大，不入库）
 tools/mineru-env/
 
-# 构建产物
+# 构建产物（公开库专属：CI 会 python -m build）
 dist/
 build/
 *.egg-info/

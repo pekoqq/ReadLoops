@@ -940,7 +940,7 @@ async function switchPage(renderFn) {
     //     canvas 定尺寸。如果在 renderFn 之后才加 wide-view，canvas 会先按
     //     阅读栏的窄宽度画好，再被容器拉宽 —— 整张图的比例就永久是错的。
     const activeView = document.querySelector('.nav-item.active')?.dataset.view;
-    const WIDE_VIEWS = ['stats', 'articles', 'vocab', 'library', 'materials', 'graph'];
+    const WIDE_VIEWS = ['stats', 'articles', 'vocab', 'test', 'library', 'materials', 'graph'];
     reader.classList.toggle('wide-view', WIDE_VIEWS.includes(activeView));
     // 离开图谱页就释放图谱状态。收敛后物理循环已停，loop 里的 isConnected
     // 检查不会再执行，仅靠它清理会一直挂着节点和 canvas 引用。
@@ -1463,9 +1463,11 @@ function updateVocabToolbar() {
 }
 
 async function loadStats() {
-  const [s, activity] = await Promise.all([
+  const [s, activity, reentry, placement] = await Promise.all([
     api.get('/api/stats/overview'),
     api.get('/api/stats/activity?weeks=26'),
+    api.get('/api/stats/reentry?limit=12').catch(() => ({ summary: null, items: [] })),
+    api.get('/api/placement/summary').catch(() => ({ has_result: false })),
   ]);
   const mins = Math.floor(s.total_reading_seconds / 60);
   const hours = Math.floor(mins / 60);
@@ -1499,9 +1501,9 @@ async function loadStats() {
         <div class="num">${s.streak_days}</div>
         <div class="label">连续学习天数</div>
       </div>
-      <div class="stat-card">
-        <div class="num">${s.vocab_estimate.toLocaleString()}</div>
-        <div class="label">估算词汇量</div>
+      <div class="stat-card"${placement.has_result ? ' style="cursor:pointer" onclick="switchPage(loadPlacement)"' : ''}>
+        <div class="num">${(placement.has_result ? placement.vocab_estimate : s.vocab_estimate).toLocaleString()}${placement.has_result && placement.is_lower_bound ? '+' : ''}</div>
+        <div class="label">${placement.has_result ? '词汇量（定级）' : '估算词汇量（未定级）'}</div>
       </div>
       <div class="stat-card">
         <div class="num">${s.test_accuracy}%</div>
@@ -1516,6 +1518,28 @@ async function loadStats() {
         <div class="label">今日待复习</div>
       </div>
     </div>
+
+    <!-- 重遇进度 -->
+    ${reentry.summary && reentry.summary.tracked > 0 ? `
+    <div class="stats-section">
+      <h2 class="stats-section-title">重遇进度</h2>
+      <div class="reentry-note">
+        方法要求：同一个生词要在<b>变化的语境</b>里重遇 ${reentry.summary.target} 次 ——
+        所以这里数的是「跨了多少篇文章」，而不是「看了几眼」。
+      </div>
+      <div class="reentry-head">
+        <span>${reentry.summary.done} / ${reentry.summary.tracked} 个学习词已达标</span>
+        <span class="reentry-avg">平均跨 ${reentry.summary.avg_articles} 篇</span>
+      </div>
+      <div class="reentry-list">
+      ${reentry.items.map(it => `
+        <div class="meter-row" title="${escapeHtml(it.meaning)}">
+          <span class="meter-label reentry-word">${escapeHtml(it.text)}</span>
+          <span class="meter-track"><span class="meter-fill" style="width:${Math.round(it.progress * 100)}%"></span></span>
+          <span class="meter-val">${it.articles}/${it.target}</span>
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
 
     <!-- 阅读热力图 -->
     <div class="stats-section">
@@ -1636,6 +1660,10 @@ async function loadTest() {
     const srsStats = await api.get('/api/words/srs-stats');
     window._srsStats = srsStats;
   } catch(e) { window._srsStats = null; }
+  // 定级结果是统计页与选词的起点，这里顺带取一次用于入口提示
+  try {
+    window._placement = await api.get('/api/placement/summary');
+  } catch(e) { window._placement = { has_result: false }; }
   renderTestHome();
 }
 
@@ -1652,6 +1680,18 @@ function renderTestHome() {
         </div>
         <button class="toolbar-btn primary">开始复习</button>
       </div>` : ''}
+      <div class="placement-entry ${window._placement && window._placement.has_result ? '' : 'pending'}"
+           onclick="switchPage(loadPlacement)">
+        <div class="placement-entry-main">
+          <div class="placement-entry-title">词汇量定级</div>
+          <div class="placement-entry-desc">${window._placement && window._placement.has_result
+            ? `当前估计 ${window._placement.vocab_estimate.toLocaleString()} 词 · 点此重新测试`
+            : '还没测过 —— 先花 3–5 分钟定级，统计和选词才有依据'}</div>
+        </div>
+        <button class="toolbar-btn ${window._placement && window._placement.has_result ? '' : 'primary'}">
+          ${window._placement && window._placement.has_result ? '查看' : '开始'}
+        </button>
+      </div>
       <div class="test-section">
         <div class="test-section-title">测试类型</div>
         <div class="test-type-grid">
@@ -2379,6 +2419,162 @@ async function loadMaterials() {
         loadMaterials();
       }
     });
+  });
+}
+
+// ---------------------------------------------------------------- 词汇量定级
+
+// 定级测试的状态。分页勾选而不是逐词作答：194 道题逐个点要 300+ 次交互，
+// 分页（每页 16 个）只要 13 次翻页，实测 3–4 分钟能做完。
+let placementItems = [];
+let placementKnown = null;     // Set：用户勾选「认识」的词
+let placementPage = 0;
+const PLACEMENT_PAGE_SIZE = 16;
+
+async function loadPlacement() {
+  const summary = await api.get('/api/placement/summary').catch(() => ({ has_result: false }));
+  if (!summary.has_result) return renderPlacementIntro(null);
+  renderPlacementResult(summary, true);
+}
+
+function renderPlacementIntro() {
+  $('#reader').innerHTML = `
+    <h1>词汇量定级</h1>
+    <p class="kb-sub">先花 3–5 分钟测出你现在的词汇量。之后所有的覆盖率、考试缺口
+       和选词，都以这次结果为起点。</p>
+    <div class="placement-intro">
+      <div class="placement-howto">
+        <div class="placement-step"><b>1</b><span>逐页勾选你<b>认识</b>的单词，不确定的就别勾</span></div>
+        <div class="placement-step"><b>2</b><span>词从最常用到最生僻分成 20 档，每档都抽了几道</span></div>
+        <div class="placement-step"><b>3</b><span>里面混有少量<b>不存在的词</b>，用来校正自评偏高 —— 请照实作答</span></div>
+        <div class="placement-step"><b>4</b><span>做完给出词汇量估计，以及离四级/六级/考研/雅思还差多少词</span></div>
+      </div>
+      <div class="placement-warn">
+        这是<b>识别</b>测试：只要看到词能想起意思就算「认识」，不需要会拼写。
+      </div>
+      <div class="placement-actions">
+        <button class="toolbar-btn primary large" id="placementStart">开始测试</button>
+        <button class="toolbar-btn" onclick="switchPage(loadTest)">返回</button>
+      </div>
+    </div>
+  `;
+  $('#placementStart').addEventListener('click', startPlacement);
+}
+
+async function startPlacement() {
+  $('#reader').innerHTML = '<div class="kb-loading">正在生成测试卷…</div>';
+  const data = await api.get('/api/placement/items');
+  placementItems = data.items || [];
+  placementKnown = new Set();
+  placementPage = 0;
+  if (!placementItems.length) {
+    $('#reader').innerHTML = '<h1>词汇量定级</h1><p class="kb-sub">题库为空，请先导入词库。</p>';
+    return;
+  }
+  renderPlacementPage();
+}
+
+function renderPlacementPage() {
+  const total = Math.ceil(placementItems.length / PLACEMENT_PAGE_SIZE);
+  const start = placementPage * PLACEMENT_PAGE_SIZE;
+  const pageItems = placementItems.slice(start, start + PLACEMENT_PAGE_SIZE);
+  const isLast = placementPage >= total - 1;
+  const pct = Math.round((start / placementItems.length) * 100);
+
+  $('#reader').innerHTML = `
+    <h1>词汇量定级</h1>
+    <div class="placement-progress">
+      <div class="placement-progress-bar"><span style="width:${pct}%"></span></div>
+      <div class="placement-progress-text">第 ${placementPage + 1} / ${total} 页 · 已勾选 ${placementKnown.size} 个</div>
+    </div>
+    <div class="placement-hint">勾选你<b>认识</b>的词（看到能想起意思即可）</div>
+    <div class="placement-grid">
+      ${pageItems.map((it, i) => `
+        <label class="placement-word ${placementKnown.has(it.text) ? 'known' : ''}" data-word="${escapeHtml(it.text)}">
+          <input type="checkbox" ${placementKnown.has(it.text) ? 'checked' : ''}>
+          <span>${escapeHtml(it.text)}</span>
+        </label>`).join('')}
+    </div>
+    <div class="placement-nav">
+      <button class="toolbar-btn" id="placementPrev" ${placementPage === 0 ? 'disabled' : ''}>上一页</button>
+      <button class="toolbar-btn primary" id="placementNext">${isLast ? '提交并查看结果' : '下一页'}</button>
+      <span class="placement-tip">不确定的不要勾 —— 混在里面的假词会揭穿猜测</span>
+    </div>
+  `;
+
+  $$('.placement-word').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      const w = el.dataset.word;
+      if (placementKnown.has(w)) { placementKnown.delete(w); el.classList.remove('known'); }
+      else { placementKnown.add(w); el.classList.add('known'); }
+      const cb = el.querySelector('input');
+      if (cb) cb.checked = placementKnown.has(w);
+      const counter = $('.placement-progress-text');
+      if (counter) counter.textContent = `第 ${placementPage + 1} / ${total} 页 · 已勾选 ${placementKnown.size} 个`;
+    });
+  });
+
+  const prev = $('#placementPrev');
+  if (prev) prev.addEventListener('click', () => { if (placementPage > 0) { placementPage--; renderPlacementPage(); } });
+  $('#placementNext').addEventListener('click', () => {
+    if (!isLast) { placementPage++; renderPlacementPage(); }
+    else submitPlacement();
+  });
+  $('#readerContainer').scrollTop = 0;
+}
+
+async function submitPlacement() {
+  $('#reader').innerHTML = '<div class="kb-loading">正在计算…</div>';
+  const answers = placementItems.map(it => ({
+    text: it.text,
+    known: placementKnown.has(it.text),
+  }));
+  try {
+    const r = await api.post('/api/placement/submit', { answers });
+    renderPlacementResult(r, false);
+  } catch (err) {
+    $('#reader').innerHTML = `<h1>词汇量定级</h1>
+      <p class="kb-sub">提交失败：${escapeHtml(String(err.message || err))}</p>
+      <button class="toolbar-btn" onclick="switchPage(loadPlacement)">返回</button>`;
+  }
+}
+
+function renderPlacementResult(r, fromSummary) {
+  const bands = r.bands || [];
+  const est = r.vocab_estimate || 0;
+
+  $('#reader').innerHTML = `
+    <h1>词汇量定级</h1>
+    <div class="placement-result">
+      <div class="placement-score">
+        <div class="placement-score-num">${est.toLocaleString()}${r.is_lower_bound ? '+' : ''}</div>
+        <div class="placement-score-label">估计词汇量${r.is_lower_bound ? '（下界，最高档也基本掌握）' : ''}</div>
+        ${fromSummary ? '' : `<div class="placement-score-meta">伪词虚报率 ${(r.false_alarm * 100).toFixed(1)}% · 作答 ${r.answered} 题
+          <br><span class="placement-note">虚报率越低，这个估计越可信</span></div>`}
+      </div>
+
+      <div class="placement-chart">
+        <div class="meter-title">分档掌握率（按词频从常用到生僻）</div>
+        ${bands.map(b => `
+          <div class="meter-row" title="${b.lo}–${b.hi} 名：抽 ${b.sampled} 题，认识 ${b.known} 题">
+            <span class="meter-label">${(b.lo / 1000).toFixed(0)}k</span>
+            <span class="meter-track">
+              <span class="meter-fill" style="width:${Math.round(b.rate * 100)}%"></span>
+            </span>
+            <span class="meter-val">${Math.round(b.rate * 100)}%</span>
+          </div>`).join('')}
+      </div>
+
+      <div class="placement-actions">
+        <button class="toolbar-btn" id="placementRetake">重新测试</button>
+        <button class="toolbar-btn" onclick="switchPage(loadStats)">去看统计</button>
+      </div>
+    </div>
+  `;
+  const retake = $('#placementRetake');
+  if (retake) retake.addEventListener('click', () => {
+    if (confirm('重新测试会覆盖上一次的定级结果，继续？')) startPlacement();
   });
 }
 

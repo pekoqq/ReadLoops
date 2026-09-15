@@ -254,8 +254,12 @@ def profile_prompt_hint() -> str:
         bits.append(f"含从句或连接词的复合句约占 {s['compound_ratio'] * 100:.0f}%")
     if s.get("ttr"):
         bits.append(f"词汇丰富度（类符/形符比）约 {s['ttr']:.2f}")
-    if s.get("low_freq_ratio") is not None:
-        bits.append(f"低频词占比约 {s['low_freq_ratio'] * 100:.0f}%")
+
+    # ⚠️ 刻意**不输出** low_freq_ratio（低频词占比）。
+    # 它描述材料本身没问题，但一旦进了生成提示，就是在指示模型「多用生僻词」——
+    # 而本产品的第一性原理是 i+1（95–98% 词汇覆盖率，也就是绝大多数词你认识）。
+    # 《傲慢与偏见》那份画像曾把「低频词占比约 100%」写进 prompt，方向正好相反。
+    # 词汇分布必须服从覆盖率约束，不能由材料画像决定。
     if not bits:
         return ""
     return "【文体参考】" + "；".join(bits) + "。"

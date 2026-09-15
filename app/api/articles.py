@@ -4,6 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from app.database import get_db
+from app.services import encounter
 from app.services.ai import generate_article
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
@@ -15,6 +16,13 @@ async def generate():
     article = generate_article()
     if not article:
         raise HTTPException(status_code=500, detail="无法生成文章，请检查 AI 配置")
+    targets = json.loads(article.target_words) if article.target_words else []
+    # 生成即记「遇见」：方法的要害是「在变化语境中反复遇见」，而系统此前只在
+    # 用户查词时才计数 —— 看到了但没查就完全不算，重遇统计永远起不来。
+    try:
+        encounter.record_article(article.id, article.content, targets)
+    except Exception:
+        pass  # 记录失败不能影响文章生成
     return {
         "id": article.id,
         "title": article.title,
@@ -22,7 +30,7 @@ async def generate():
         "source": article.source,
         "word_count": article.word_count,
         "new_word_count": article.new_word_count,
-        "target_words": json.loads(article.target_words) if article.target_words else [],
+        "target_words": targets,
         "created_at": article.created_at,
     }
 
