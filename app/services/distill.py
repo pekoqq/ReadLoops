@@ -14,7 +14,7 @@ import time
 from typing import Optional
 
 from app.database import get_db
-from app.services.materials import split_sentences, count_words
+from app.services.materials import count_words, split_sentences
 
 # 从句 / 复合结构标记词（用于估算句子复杂度）
 _SUBORDINATORS = {
