@@ -34,6 +34,17 @@ AI 驱动的英语阅读训练器「ReadLoops」（原名约读 → ReadForge �
 
 ## 当前状态
 
+### v2.3.1 — 专注计时联动 + 整句翻译健壮性 + 知识库工作台 + 顶光涟漪熄灭（已完成，2026-09-16；PyPI 已发布 2.3.1）
+
+- **专注计时严格挂钩**：新不变量「计时器只在专注模式下运行」（`startTimer()` 首行 `if(!focusMode) return`）；空格/计时按钮统一走 `toggleTimerWithFocus()`（非专注 = 进专注并开始计时，专注中 = 暂停/继续）；修复第一个 keydown 处理器调用未定义 `toggleTimer()` 的坏分支
+- **整句翻译健壮性**：deepseek-flash 思考泄漏（content 空、答案在 reasoning_content）判定为可重试，`_chat()` 最多重试 2 次；`/api/words/translate` 改 `asyncio.to_thread` + 502 带原因；长度上限 60→280；前端失败给「点击重试」
+- **logo hover 动效**：hover 0.85s 转一圈 + 微放大（animation 避免离开整圈倒转）、:active 回弹 0.86，currentColor 单色，reduced-motion 兜底
+- **引导箭头**：右侧查词抽屉浮动小玻璃箭头，触发一次抽屉后 localStorage 记住并消失
+- **专注顶光涟漪熄灭（9/15–16 定稿）**：光斑扩 120vw、中心推出视口外（日常只见柔弧、不是完整圆）；进入专注单团顶光用 `focusGlow` **animation**「先亮起(brightness 2.6)再熄灭」，与涟漪同 0.3s 延迟、3s 时长一起落定；第二团光 1s 先淡出；`--content-shift` 对齐阅读栏（侧栏折叠归 0）；`.focus-shade` 聚焦暗角四主题 token
+- **知识库工作台（9/15）**：书架（Gutenberg 搜索下载）、材料（粘贴/TXT/MD/EPUB/PDF）、风格蒸馏画像接入文章生成、力导向知识图谱；PDF 走 pypdf + MinerU 独立环境（**直连 pipeline，勿用官方 CLI**——3.4.5 本地轮询 404）；批量识词「识别 → 可编辑预览 → 确认」
+- **质量基线**：41 pytest passed；CI 全绿（三 OS × 3 作业：quality/package/docker）；两库 app 目录已逐文件核对一致（本次交接补齐私有库 `dict_import.py` + `cli.py` 词库导入命令）
+- 详细变更见 `docs/CHANGELOG.md` 的 `[2.3.1]`；**交接要点见 `docs/HANDOFF.md` 文首「最新进展」**
+
 ### v2.3.0 — UI/动效打磨 + 划词翻译（已完成，2026-09-14）
 
 - **建立设计 token 体系**：按钮（`--btn-*`）、动效（`--page-*` / `--enter-*`）、缓动（`--ease-*`）、玻璃（`--glass*`）、氛围光（`--ambient-*`）全部收敛到 `:root`
