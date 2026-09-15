@@ -1,7 +1,7 @@
 # 约读阅读器 — 项目记忆文件
 
 > 本文件是项目的核心记忆，每次会话开始时应读取，结束时更新。
-> 最后更新：2026-09-14（v2.3.0，UI/动效打磨 + 划词翻译；动效已定稿；已开源发布到 github.com/pekoqq/ReadLoops）
+> 最后更新：2026-09-16（v2.3.2，知识图谱重建 + 全量蒸馏；v2.3.1 已发布 PyPI，v2.3.2 未发布）
 
 ## 项目定位
 
@@ -34,6 +34,35 @@ AI 驱动的英语阅读训练器「ReadLoops」（原名约读 → ReadForge �
 
 ## 当前状态
 
+### v2.3.2 — 知识图谱重建 + 全量蒸馏（已完成，2026-09-16；**未发布到 PyPI**）
+
+用户反馈「图谱的比例和动画有问题」。用浏览器实测 + canvas 内省定位（不是目测），根因有五层：
+
+- **多 rAF 循环叠加**：循环标志挂在每次都会重建的 `graphState` 上 → 每切换一次筛选就永久多一个
+  物理循环（切换 4 次后 30fps → **238fps**）。改为模块级循环句柄 + 重建前 cancel。
+- **物理极限环**：斥力无上限、无 dt 归一化、无速度上限、硬边界裁剪（速度峰值 **9651px/帧**）。
+  更关键的是**只靠阻尼在数学上就收不了**—— N 体合力通常没有平衡点。解法是 **alpha 退火冷却**
+  （力整体衰减到 0，d3-force 同款）+ 子步进（30fps 时 dt=2 会过冲）+ 软化斥力 + 柔性边界。
+  收敛后彻底停循环。
+- **画布比例**：`wide-view` 漏了知识库三页（书架/材料/图谱）→ 图谱被塞进 720px 阅读栏；
+  且宽窄切换发生在渲染**之后**，canvas 按旧宽度定尺寸。两处都已修。
+- **内容比例（真凶）**：150 个短语节点**连接度全部为 0**，纯靠斥力被推到画布边缘排成硬边。
+  `rebuild()` 改为**不产生孤立节点** + 新增「文档→短语」边 → 73 节点 / 174 边 / 孤立 0。
+- **数据噪声**：`phrases` 表 198 条 `&quot;` 实体残留（`quot says` 频率 87 居榜首）——**它同时
+  污染文章生成**（TOP50 短语池里 14 条是垃圾，每次生成随机选 2-3 条塞进 prompt）；词节点混入
+  整句碎片（`rget What They Learn?`/`urnal, s`）。已清 201 条短语、词节点只接受单个英文词。
+
+另外：`rebuild()` 语义改为**全量重算**（原来是增量累加边权，反复重建会让权重无限膨胀）；
+图谱配色改为读主题变量（`--accent` 在深色主题下等于 `--text`，短语和词原本同色）；
+短语改用独立色相；布局改为**各向异性映射**（物理在正方形域跑、渲染按画布长宽比拉伸，
+否则横长条画布上左右永远空一片）。
+
+验收（浏览器实测）：静止后 0.5s 位移 **0.000px**、贴边节点 **0**、切换筛选后 **0fps**（原 238fps）、
+画布 608→**1018px**、无控制台错误；pytest 41 passed、ruff 全绿。
+
+**「材料」全量蒸馏**：对全部已解析材料重新蒸馏为画像「全部材料」并激活（多份材料是合并统计，
+不是分别平均）。
+
 ### v2.3.1 — 专注计时联动 + 整句翻译健壮性 + 知识库工作台 + 顶光涟漪熄灭（已完成，2026-09-16；PyPI 已发布 2.3.1）
 
 - **专注计时严格挂钩**：新不变量「计时器只在专注模式下运行」（`startTimer()` 首行 `if(!focusMode) return`）；空格/计时按钮统一走 `toggleTimerWithFocus()`（非专注 = 进专注并开始计时，专注中 = 暂停/继续）；修复第一个 keydown 处理器调用未定义 `toggleTimer()` 的坏分支
@@ -61,7 +90,7 @@ AI 驱动的英语阅读训练器「ReadLoops」（原名约读 → ReadForge �
 - 详细变更见 `docs/CHANGELOG.md` 的 `[2.3.0]`；**UI 交接要点见 `docs/HANDOFF.md` 文首「最新进展」**
 
 ### v2.2.2 — 开源拆分 + 安全审计（已完成）
-- **P0 安全发现**：私有库历史提交 `096ac91` 曾把 `data/yuedu.db`（87MB）入库，含**真实 API Key**（`sk-acc7417d5...`，与当前活跃 key 相同）+ 个人阅读记录。提交 `65b1380` 后移出工作区，但 blob 仍在历史。
+- **P0 安全发现**：私有库历史提交 `096ac91` 曾把 `data/yuedu.db`（87MB）入库，含**真实 API Key**（与当前活跃 key 相同；**片段已从文档移除，不再随仓库分发**）+ 个人阅读记录。提交 `65b1380` 后移出工作区，但 blob 仍在历史。
   - **处置（2026-09-13 复核后修正）**：私有库无远程、从未推送 → 密钥未外泄；用户决定继续使用该 Key。已加 `pre-push` 钩子防止误推送；不重写历史。
 - **公开库落地** `~/readloops/`：脱敏导出，历史从零（`.git` 344K，物理不含旧 blob）。
 - **顺手修复的真实缺陷**：
@@ -211,15 +240,19 @@ launchctl unload -w ~/Library/LaunchAgents/com.readloops.server.plist # 卸载
 ├── skills/
 │   └── cet4-style-distiller/    # 真题风格蒸馏 Skill（含语料副本）
 ├── docs/                # PROJECT_MEMORY.md / CHANGELOG.md / HANDOFF.md / UI_UX_EVOLUTION_PLAN.md / decisions/
-├── tests/               # ⚠️ 当前为空
+├── tests/               # 6 个测试文件，41 个用例（pytest）
 └── .git/                # Git 仓库（master 分支）
 ```
 
-## 数据库表结构（10表）
+## 数据库表结构（15 表）
 
 > **schema 单一事实源** = `app/database.py` 的 `SCHEMA`。
 > `init_db()` 除建表外还会调用 `_ensure_columns()`，**启动时自动补齐历史库缺失的列**（幂等）。
 > 新增字段时：改 `SCHEMA` + 在 `COLUMN_MIGRATIONS` 里登记，旧库即可自愈——不要再写一次性迁移脚本补列。
+
+> 实际 15 表：users / words / word_encounters / articles / highlights / reading_sessions /
+> tests / settings / phrases / test_questions / books / materials / style_profiles /
+> graph_nodes / graph_edges
 
 1. **users** — 用户（默认用户1）
 2. **words** — 单词表（17.5万词，含 ECDICT 释义、exchange词形变化、FSRS字段、lookup_count、wrong_count、correct_count）
@@ -248,7 +281,7 @@ launchctl unload -w ~/Library/LaunchAgents/com.readloops.server.plist # 卸载
 | 设置面板 | ✅ | AI 配置+测试连接+主题 |
 | 四主题 | ✅ | 深色/纸质护眼/明亮/纯黑 |
 | 单词测试 | ✅ | 智能出题（权重抽样优先不会的词），多题型，测试首页+答题页+结果页 |
-| FSRS 记忆 | ✅ | 文章选词驱动，测试结果更新，复习队列 API，py-fsrs 算法 |
+| FSRS 记忆 | ✅ | 文章选词驱动，测试结果更新，复习队列 API（**自研简化 FSRS**，非 py-fsrs） |
 | 专注模式 | ✅ | 自动开启，水波纹引导，边缘触发UI，Esc/F/Space快捷键 |
 | PWA | ✅ | 可安装为独立 Mac 应用，无浏览器标题栏 |
 | 液态玻璃 | ✅ | SVG feTurbulence+feDisplacementMap 边缘折射，所有玻璃组件 |
@@ -277,7 +310,7 @@ launchctl unload -w ~/Library/LaunchAgents/com.readloops.server.plist # 卸载
 1. 语法测试题库未构建（测试首页显示"即将上线"占位）
 2. 移动端**暂缓**（2026-09-13 决定）：这不是"做个 App"（项目是网页应用，无安装包），而是响应式改造。**前置死结**：服务绑 `127.0.0.1`，手机即使同 WiFi 也访问不到，需先解决远程访问方案
 3. 真题语料仅用于「文章相似度匹配」；生成用的风格参数**已硬编码在 `ai.py` 的 prompt 中**，不依赖语料文件
-4. 服务需要手动启动（没有 launchd 开机自启），电脑重启后需重新运行启动命令
+4. 服务由 launchd 托管（`~/Library/LaunchAgents/com.readloops.server.plist`，KeepAlive + RunAtLoad），登录即启动、崩溃自动重启
 5. 项目文件夹名仍是「约读」，数据库名 yuedu.db，应用名 ReadLoops（历史遗留，不影响功能）
 6. **`语料库/词表/` 目录为空**：CET4/CET6 词表源文件已不在磁盘；词数据已导入 DB（level=CET4 共 4530 词），重新导入需自备词表文件
 7. **`语料库/真题/` 目录为空**：42 套真题文件被 `.gitignore` 排除且已不在磁盘，仅剩空目录；现存真题语料只有 205 篇提取后的 JSON

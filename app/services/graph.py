@@ -30,6 +30,48 @@ _STOPWORDS = {
 
 MAX_NODES = 600
 
+# ------------------------------------------------------------------ 清洗
+# 词节点只接受「单个英文词」形态：小写、无空格、无标点（撇号 / 连字符除外）。
+# 历史遗留：批量识词与查词兜底曾把整句碎片写进 words 表
+# （"rget What They Learn?"、"urnal, s"、"Old Chen"），它们不是词，
+# 进图只会变成噪声，并把图的视觉重心带偏 —— 在这里一律挡掉。
+_WORD_LABEL_RE = re.compile(r"^[a-z][a-z'-]*$")
+_MIN_WORD_LEN = 2
+_MAX_WORD_LEN = 24
+
+# 短语库早期从 HTML 页面抓取，残留 &quot; 实体，产出 "quot says" / "said quot"
+# 这类条目（频率还很高，会霸占榜首）。含实体残留或标点的短语直接丢弃。
+_JUNK_PHRASE_RE = re.compile(r"(?i)\bquot\b|&[a-z]+;|&#\d+;")
+_PHRASE_RE = re.compile(r"^[a-z][a-z' -]*[a-z]$")
+_MIN_PHRASE_LEN = 4
+_MAX_PHRASE_LEN = 60
+
+
+def _clean_word(label: Optional[str]) -> Optional[str]:
+    """把候选词规范成单个小写英文词；不是词就返回 None。"""
+    word = (label or "").strip().lower()
+    if not (_MIN_WORD_LEN <= len(word) <= _MAX_WORD_LEN):
+        return None
+    if not _WORD_LABEL_RE.match(word):
+        return None
+    if word in _STOPWORDS:
+        return None
+    return word
+
+
+def _clean_phrase(text: Optional[str]) -> Optional[str]:
+    """短语必须是 2–5 个纯英文词；含实体残留 / 标点的一律丢弃。"""
+    phrase = " ".join((text or "").split()).lower()
+    if not (_MIN_PHRASE_LEN <= len(phrase) <= _MAX_PHRASE_LEN):
+        return None
+    if _JUNK_PHRASE_RE.search(phrase):
+        return None
+    if not _PHRASE_RE.match(phrase):
+        return None
+    if not 2 <= len(phrase.split()) <= 5:
+        return None
+    return phrase
+
 
 # ---------------------------------------------------------------- 构建
 
@@ -71,30 +113,39 @@ def _upsert_edge(db, src: int, dst: int, edge_type: str, weight: float = 1.0) ->
 
 def rebuild(include_words: bool = True, include_phrases: bool = True,
             include_docs: bool = True, max_nodes: int = MAX_NODES) -> dict:
-    """重建整张图。
+    """重建整张图（**全量重算**，不是增量累加）。
 
-    这是幂等的：节点按 (type, ref_id) 唯一，边按 (src, dst, type) 累加权重，
-    所以可以反复调用，图会随数据增长而变丰富。
+    早期实现用 `ON CONFLICT ... weight = weight + excluded.weight` 累加边权，
+    反复点「重建图谱」会让权重无限膨胀，而且过时节点永远清不掉。
+    重建就该是重建：先清空，再按当前数据重算。
+
+    构图原则：**不产生孤立节点**。只有真的被连上的词 / 短语才建节点 ——
+    孤立节点在力导向图里没有任何弹簧牵引，会被斥力一路推到画布边缘排成硬边，
+    整张图的视觉比例就毁了（这正是「短语节点 100% 孤立 → 上下两条硬边」的成因）。
     """
     stats = {"nodes": 0, "edges": 0, "words": 0, "phrases": 0, "docs": 0}
 
     with get_db() as db:
-        word_ids: dict[str, int] = {}
+        db.execute("DELETE FROM graph_edges")
+        db.execute("DELETE FROM graph_nodes")
 
-        # ---- 1. 词节点：优先取「用户接触过 / 正在学」的词，其次高频词
+        # ---- 1. 候选词：清洗碎片 + 按词形去重
+        # 同一个词形可能有多行（真实词条 + 早期兜底写进来的重复项，
+        # 如 "every" 与 "Every"），按投入度排序后只保留第一个。
+        word_meta: dict[str, dict] = {}
         if include_words:
             rows = db.execute(
                 """SELECT id, lemma, text, meaning, level, frequency, status,
                           lookup_count, encounter_count
                    FROM words
-                   WHERE status IN ('learning','review') OR lookup_count > 0
+                   WHERE status IN ('learning','review','target') OR lookup_count > 0
                       OR encounter_count > 0
                    ORDER BY (lookup_count + encounter_count) DESC, frequency DESC
                    LIMIT ?""",
-                (max_nodes,),
+                (max_nodes * 4,),
             ).fetchall()
 
-            # 如果用户还没有学习记录，退化为「按词频取常用词」，保证图不是空的
+            # 还没有学习记录时退化为「按词频取常用词」，保证图不是空的
             if not rows:
                 rows = db.execute(
                     """SELECT id, lemma, text, meaning, level, frequency, status,
@@ -105,32 +156,55 @@ def rebuild(include_words: bool = True, include_phrases: bool = True,
                 ).fetchall()
 
             for r in rows:
-                lemma = (r["lemma"] or r["text"] or "").lower()
-                if not lemma or lemma in _STOPWORDS:
+                label = _clean_word(r["lemma"] or r["text"])
+                if not label or label in word_meta:
                     continue
-                w = 1.0 + (r["lookup_count"] or 0) * 0.6 + (r["encounter_count"] or 0) * 0.3
-                nid = _upsert_node(db, "word", r["id"], lemma, round(w, 2), {
-                    "level": r["level"], "status": r["status"],
-                    "meaning": (r["meaning"] or "")[:120],
-                    "frequency": r["frequency"] or 0,
-                })
-                word_ids[lemma] = nid
-                stats["words"] += 1
+                weight = 1.0 + min(6.0, (r["lookup_count"] or 0) * 0.6
+                                        + (r["encounter_count"] or 0) * 0.3)
+                word_meta[label] = {
+                    "ref_id": r["id"], "weight": round(weight, 2),
+                    "meta": {"level": r["level"], "status": r["status"],
+                             "meaning": (r["meaning"] or "")[:120],
+                             "frequency": r["frequency"] or 0},
+                }
 
-        # ---- 2. 短语节点
+        # ---- 2. 候选短语：清掉 quot 实体残留等垃圾
+        phrase_meta: dict[str, dict] = {}
         if include_phrases:
-            rows = db.execute(
+            for r in db.execute(
                 "SELECT id, text, meaning, level, frequency FROM phrases "
-                "ORDER BY frequency DESC LIMIT 150"
-            ).fetchall()
-            for r in rows:
-                _upsert_node(db, "phrase", r["id"], r["text"], 1.5, {
-                    "level": r["level"], "meaning": (r["meaning"] or "")[:120],
-                    "frequency": r["frequency"] or 0,
-                })
-                stats["phrases"] += 1
+                "ORDER BY frequency DESC LIMIT ?",
+                (max_nodes,),
+            ).fetchall():
+                text = _clean_phrase(r["text"])
+                if not text or text in phrase_meta:
+                    continue
+                phrase_meta[text] = {
+                    "ref_id": r["id"],
+                    "weight": round(1.5 + min(2.0, (r["frequency"] or 0) / 40), 2),
+                    "meta": {"level": r["level"], "meaning": (r["meaning"] or "")[:120],
+                             "frequency": r["frequency"] or 0},
+                }
 
-        # ---- 3. 文章 / 材料节点 + 共现边
+        node_ids: dict[tuple[str, str], int] = {}
+
+        def _get_word_node(label: str) -> int:
+            key = ("word", label)
+            if key not in node_ids:
+                info = word_meta[label]
+                node_ids[key] = _upsert_node(db, "word", info["ref_id"], label,
+                                             info["weight"], info["meta"])
+            return node_ids[key]
+
+        def _get_phrase_node(text: str) -> int:
+            key = ("phrase", text)
+            if key not in node_ids:
+                info = phrase_meta[text]
+                node_ids[key] = _upsert_node(db, "phrase", info["ref_id"], text,
+                                             info["weight"], info["meta"])
+            return node_ids[key]
+
+        # ---- 3. 文档节点 + 边
         if include_docs:
             docs = []
             for r in db.execute("SELECT id, title, content FROM articles LIMIT 100").fetchall():
@@ -141,27 +215,47 @@ def rebuild(include_words: bool = True, include_phrases: bool = True,
                 docs.append(("material", r["id"], r["title"], r["content"] or ""))
 
             for dtype, did, title, content in docs:
-                # 只统计已建节点的词，避免图里出现孤立叶子
+                lowered = content.lower()
                 toks = [w.lower() for w in _WORD_RE.findall(content)]
-                present = [w for w in toks if w in word_ids]
-                if not present:
+                present = [w for w in toks if w in word_meta]
+                # 短语只有真的出现在文档里才建节点，这样它必然带有连边
+                matched = [p for p in phrase_meta if p in lowered]
+                if not present and not matched:
                     continue
+
                 counter = Counter(present)
-                did_node = _upsert_node(
+                doc_node = _upsert_node(
                     db, dtype, did, (title or "")[:60],
-                    round(1.0 + len(counter) / 200, 2),
-                    {"words": len(counter)},
+                    round(1.0 + min(6.0, len(counter) / 20 + len(matched) / 10), 2),
+                    {"words": len(counter), "phrases": len(matched)},
                 )
-                # 文章→词（contains）
                 for w, c in counter.most_common(40):
-                    _upsert_edge(db, did_node, word_ids[w], "contains", float(c))
-                # 词↔词 共现（只取同段高频词对，控制边数）
+                    _upsert_edge(db, doc_node, _get_word_node(w), "contains", float(c))
+                # 每份文档最多挂 40 条短语。短语来自通用短语库、不是用户自己的积累，
+                # 全挂上去会让某一份材料变成"蒲公英"，把整张图的比例主导掉。
+                for p in matched[:40]:
+                    _upsert_edge(db, doc_node, _get_phrase_node(p), "contains",
+                                 float(min(20, lowered.count(p))))
+
+                # 词↔词 共现（只取同一文档里的高频词对，控制边数）
                 top = [w for w, _ in counter.most_common(12)]
                 for i in range(len(top)):
                     for j in range(i + 1, len(top)):
-                        _upsert_edge(db, word_ids[top[i]], word_ids[top[j]], "cooccur", 1.0)
+                        _upsert_edge(db, _get_word_node(top[i]), _get_word_node(top[j]),
+                                     "cooccur", 1.0)
                 stats["docs"] += 1
 
+        # ---- 4. 兜底：一份文档都没有时，也要给出一张能看的图
+        # 此时节点天然孤立，前端会把孤立节点锚在环形上，不会挤成硬边。
+        if not stats["docs"]:
+            for label in list(word_meta)[:60]:
+                _get_word_node(label)
+            if include_phrases:
+                for text in list(phrase_meta)[:60]:
+                    _get_phrase_node(text)
+
+        stats["words"] = sum(1 for kind, _ in node_ids if kind == "word")
+        stats["phrases"] = sum(1 for kind, _ in node_ids if kind == "phrase")
         stats["nodes"] = db.execute("SELECT COUNT(*) FROM graph_nodes").fetchone()[0]
         stats["edges"] = db.execute("SELECT COUNT(*) FROM graph_edges").fetchone()[0]
 

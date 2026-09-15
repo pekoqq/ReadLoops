@@ -1,12 +1,18 @@
 # ReadLoops 项目交接文档
 
 > 交接时间：2026-09-16
-> 项目版本：v2.3.1（功能完整，可正常运行；PyPI 已发布 2.3.1）
+> 项目版本：v2.3.2（功能完整，可正常运行；PyPI 已发布 2.3.1，v2.3.2 未发布）
 > 本文档面向接手的新 Agent / 开发者，包含功能状态、已知问题、待办、文件位置索引与快速上手清单。
 
 ---
 
 ## 🚩 最新进展（2026-09-16，接手请先读这一节）
+
+**2.3.2（最新）：知识图谱重建 + 全量蒸馏。** 用户反馈图谱「比例和动画有问题」，实测定位到五层
+根因（多 rAF 循环叠加 / 物理极限环 / 画布被阅读栏卡住 / 150 个短语节点 100% 孤立 / `quot` 垃圾
+数据）。修复要点与验收数据见 `docs/CHANGELOG.md` 的 `[2.3.2]` 与 `docs/PROJECT_MEMORY.md`。
+**改图谱前必读**：物理必须保留 **alpha 退火**（只靠阻尼在数学上收不了，会停在永久极限环）；
+构图必须**不产生孤立节点**（孤立节点没有弹簧牵引，会被斥力推到画布边缘排成硬边）。
 
 **本日（9/15 晚–9/16）定稿了专注模式的顶光动效**，此前（9/15 凌晨）完成知识库工作台：书架、材料导入、统计画像蒸馏、知识图谱和 PDF 解析。阅读器仍是主功能，知识库是围绕阅读的增强层。
 
@@ -230,7 +236,7 @@ launchctl load -w ~/Library/LaunchAgents/com.readloops.server.plist
 
 ---
 
-## 五、数据库表结构（10 表）
+## 五、数据库表结构（15 表）
 
 `data/yuedu.db`（SQLite，83MB）
 
@@ -246,6 +252,7 @@ launchctl load -w ~/Library/LaunchAgents/com.readloops.server.plist
 | 8 | `settings` | 设置（key-value，含 AI API Key） |
 | 9 | `phrases` | 短语库（1,238 个真题高频短语） |
 | 10 | `test_questions` | 测试题目缓存 |
+| 11–15 | `books` / `materials` / `style_profiles` / `graph_nodes` / `graph_edges` | 知识库：书架、材料、风格画像、图谱节点与边 |
 
 ---
 
@@ -254,7 +261,7 @@ launchctl load -w ~/Library/LaunchAgents/com.readloops.server.plist
 **已知问题：**
 1. **语法测试**未实现（测试首页占位）
 2. **移动端未适配**（规划见 UI_UX_EVOLUTION_PLAN.md 任务 7）
-3. **服务不自启**：无 launchd，重启电脑需手动启动
+3. ~~服务不自启~~ → **已解决**：launchd `com.readloops.server.plist` 已就位（KeepAlive + RunAtLoad），登录即启动、崩溃自动重启
 4. **命名历史遗留**：文件夹名「约读」、数据库名 `yuedu.db`、应用名 ReadLoops（不影响功能）
 5. **`语料库/词表/` 为空**：CET4/CET6 词表源文件已不在磁盘（词数据已入库，level=CET4 共 4,530 词）
 6. **`语料库/真题/` 为空**：42 套真题被 `.gitignore` 排除且已不在磁盘；现存唯一真题语料为 205 篇 JSON

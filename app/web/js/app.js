@@ -113,6 +113,9 @@ $('#themeSelect').addEventListener('change', (e) => {
   document.body.classList.add('theme-transition');
   document.documentElement.setAttribute('data-theme', e.target.value);
   localStorage.setItem('yuedu-theme', e.target.value);
+  // 图谱的配色取自主题变量（节点/标签/连线都是 currentColor 体系），
+  // 切主题后必须重绘一次，否则浅色主题下会留着上一套颜色。
+  if (graphState) drawGraph();
   clearTimeout(window.__themeTransitionTimer);
   window.__themeTransitionTimer = setTimeout(() => {
     document.body.classList.remove('theme-transition');
@@ -932,6 +935,17 @@ async function switchPage(renderFn) {
   // 1. 淡出（只用opacity，减少重绘）
   reader.classList.add('page-fading');
   setTimeout(async () => {
+    // 1.5 先切宽窄布局，再渲染内容。
+    //     顺序有讲究：知识图谱 / 书架 / 材料这类宽内容要按容器真实宽度给
+    //     canvas 定尺寸。如果在 renderFn 之后才加 wide-view，canvas 会先按
+    //     阅读栏的窄宽度画好，再被容器拉宽 —— 整张图的比例就永久是错的。
+    const activeView = document.querySelector('.nav-item.active')?.dataset.view;
+    const WIDE_VIEWS = ['stats', 'articles', 'vocab', 'library', 'materials', 'graph'];
+    reader.classList.toggle('wide-view', WIDE_VIEWS.includes(activeView));
+    // 离开图谱页就释放图谱状态。收敛后物理循环已停，loop 里的 isConnected
+    // 检查不会再执行，仅靠它清理会一直挂着节点和 canvas 引用。
+    if (activeView !== 'graph') stopGraph();
+
     // 2. 替换内容 —— 必须 await！
     //    renderFn 里多是异步函数（loadStats / loadVocab / loadArticlesList…），
     //    它们要先拿到接口数据才写 innerHTML。不等它完成就淡入的话，
@@ -940,13 +954,6 @@ async function switchPage(renderFn) {
       await renderFn();
     } catch (err) {
       console.error('页面渲染失败:', err);
-    }
-    // 根据当前视图决定是否宽布局
-    const activeView = document.querySelector('.nav-item.active')?.dataset.view;
-    if (activeView === 'stats' || activeView === 'articles' || activeView === 'vocab') {
-      reader.classList.add('wide-view');
-    } else {
-      reader.classList.remove('wide-view');
     }
     // 专注模式服务于「沉浸阅读」，只在阅读页显示入口；
     // 生词本 / 历史文章 / 测试 / 统计等页面隐藏，避免误触无意义的全屏。
@@ -2378,6 +2385,54 @@ async function loadMaterials() {
 // ---------------------------------------------------------------- 知识图谱
 
 let graphState = null;
+let graphRAF = 0;
+let graphResizeTimer = 0;
+
+/**
+ * 停掉物理循环（必须在重建 graphState 之前调用）。
+ *
+ * 这里原本有个很隐蔽的坑：循环标志 `_looping` 挂在 graphState 上，而
+ * drawGraph() 每次都会重建 graphState —— 标志永远是 undefined，于是每切换
+ * 一次筛选 / 每点一次重建，就永久多出一个 requestAnimationFrame 循环。
+ * 多个循环同时迭代同一份节点，物理步进被叠加 N 倍
+ * （实测：切换 4 次筛选后 30fps → 238fps），整张图疯抖不停。
+ * 循环句柄必须是模块级的，且切换前先取消。
+ */
+function stopGraph() {
+  if (graphRAF) { cancelAnimationFrame(graphRAF); graphRAF = 0; }
+  graphState = null;
+  const tip = $('#graphTip');
+  if (tip) tip.style.display = 'none';
+}
+
+// 力导向参数。三条硬约束，缺一条图就会「炸开贴墙」：
+//   1) 斥力必须软化并封顶。1/d² 在两点极近时是天文数字，节点会被瞬间弹飞，
+//      撞到边界后永久贴墙抖动（实测修复前速度峰值 9651 px/帧）。
+//   2) 必须按真实帧间隔归一化（dt）。掉帧时直接累加速度会让物理发散。
+//   3) 边界要从「硬裁剪」改成「柔性回推」。硬裁剪把节点压在画布边上，
+//      就是修复前上下两条硬边的直接成因。
+const PHYS = {
+  repulsion: 1800,    // 斥力系数（实测扫描出的最佳值，见调优记录）
+  softMin2: 900,      // 距离平方下限（≈30px 内不再增强，消除奇点）
+  maxRepForce: 24,    // 单对斥力上限
+  springLen: 58,      // 弹簧自然长度
+  springK: 0.075,
+  centerPull: 0.0016,
+  damping: 0.72,      // 每 1/60s 的阻尼
+  maxSpeed: 6,        // 速度上限（px/帧，按 60fps 计）
+  padding: 26,
+  // ---- 退火（这是图能真正"停下来"的关键）----
+  // 只靠阻尼是不够的：N 体斥力 + 弹簧的合力在多数布局里**没有平衡点**，
+  // 系统会进入永久极限环（实测速度永远停在 0.1~0.3px/帧，永不收敛）。
+  // 标准解法是模拟退火：让所有力乘一个从 1 衰减到 0 的 alpha，
+  // 力本身趋于零，图必然静止（d3-force 的做法）。
+  alphaDecay: 0.972,  // 每 1/60s 的 alpha 衰减
+  alphaMin: 0.004,    // 低于此值即认为布局完成，停掉循环
+};
+
+// 四类节点的基准半径。要拉开层次，否则 78 个短语和 14 个词一样大，
+// 视觉上就是一坨没有重心的点云。
+const NODE_BASE_R = { word: 4.0, phrase: 5.2, article: 9.0, material: 11.0 };
 
 async function loadGraph() {
   $('#reader').innerHTML = `
@@ -2403,11 +2458,17 @@ async function loadGraph() {
     const btn = $('#graphRebuildBtn');
     btn.disabled = true;
     btn.textContent = '重建中…';
-    const s = await api.post('/api/graph/rebuild', {});
-    toast(`图谱已重建：${s.nodes} 节点 / ${s.edges} 边`);
-    btn.disabled = false;
-    btn.textContent = '重建图谱';
-    drawGraph();
+    try {
+      const s = await api.post('/api/graph/rebuild', {});
+      toast(`图谱已重建：${s.nodes} 节点 / ${s.edges} 边`);
+      await drawGraph();
+    } catch (err) {
+      toast('重建失败');
+      console.error(err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '重建图谱';
+    }
   });
 
   $$('#graphFilters input').forEach(cb => cb.addEventListener('change', drawGraph));
@@ -2416,6 +2477,8 @@ async function loadGraph() {
 }
 
 async function drawGraph() {
+  stopGraph();
+
   const types = $$('#graphFilters input').filter(c => c.checked).map(c => c.value);
   const canvas = $('#graphCanvas');
   const stage = $('#graphStage');
@@ -2423,18 +2486,17 @@ async function drawGraph() {
 
   if (!types.length) {
     $('#graphStats').textContent = '请至少选择一种节点类型';
-    graphState = null;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
     return;
   }
 
   const data = await api.get(`/api/graph?types=${types.join(',')}&limit=400`);
+  // 请求期间用户可能已经切走了 —— 元素没了就直接放弃，别往空气里画
+  if (!document.body.contains(canvas)) return;
   $('#graphStats').textContent = `${data.nodes.length} 节点 · ${data.edges.length} 边`;
 
   if (!data.nodes.length) {
     $('#graphStats').textContent = '图谱是空的，点「重建图谱」试试';
-    graphState = null;
     return;
   }
 
@@ -2447,16 +2509,31 @@ async function drawGraph() {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+  // ---- 物理域 vs 显示域（各向异性映射）----
+  // 力导向的自然形状是圆的，而画布是横长条（1020×598）。直接在画布坐标里跑
+  // 物理，图会被画布高度卡住、左右永远空一大片（实测 spanY≈1.00、spanX≈0.50）。
+  // 所以物理只在 min(W,H) 的正方形域里跑，渲染/命中测试时再按画布长宽比
+  // 拉伸到显示域 —— 布局变成椭圆，正好铺满可视区域。
+  const PAD = PHYS.padding;
+  const S = Math.max(80, Math.min(W, H) - PAD * 2);
+  const kx = (W - PAD * 2) / S;
+  const ky = (H - PAD * 2) / S;
+  const toSX = (x) => PAD + (x - PAD) * kx;
+  const toSY = (y) => PAD + (y - PAD) * ky;
+  const toLX = (x) => PAD + (x - PAD) / kx;   // 屏幕 → 物理域（拖拽用）
+  const toLY = (y) => PAD + (y - PAD) / ky;
+
   // 初始布局：按类型分环，避免全部堆在中心
   const typeOrder = ['article', 'material', 'phrase', 'word'];
   const nodes = data.nodes.map((n, i) => {
     const ring = Math.max(1, typeOrder.indexOf(n.type) + 1);
     const a = (i / data.nodes.length) * Math.PI * 2 + ring;
-    const r = Math.min(W, H) * 0.12 * ring;
+    const r = S * 0.10 * ring;
+    const cx = PAD + S / 2, cy = PAD + S / 2;
     return {
       ...n,
-      x: W / 2 + Math.cos(a) * r,
-      y: H / 2 + Math.sin(a) * r,
+      x: cx + Math.cos(a) * r,
+      y: cy + Math.sin(a) * r,
       vx: 0, vy: 0,
       deg: 0,
     };
@@ -2467,54 +2544,124 @@ async function drawGraph() {
     .filter(l => l.s && l.t);
   links.forEach(l => { l.s.deg++; l.t.deg++; });
 
+  // 兜底：万一出现孤立节点（没有弹簧牵引），给它在四周安排一个「家」并
+  // 加强锚定。否则它只会被斥力一路推出去，最后贴在画布边缘排成硬边。
+  const cx = PAD + S / 2, cy = PAD + S / 2;
+  const isolated = nodes.filter(n => n.deg === 0);
+  isolated.forEach((n, i) => {
+    const a = (i / Math.max(1, isolated.length)) * Math.PI * 2 - Math.PI / 2;
+    const r = S * 0.40;
+    n.homeX = cx + Math.cos(a) * r;
+    n.homeY = cy + Math.sin(a) * r;
+    n.homeK = 0.06;
+  });
+
+  // 配色全部取自主题变量：写死颜色会在浅色主题下变成白字白底。
+  const cssVar = (name, fallback) => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return (v || '').trim() || fallback;
+  };
   const palette = {
-    word: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#fdfcfc',
-    phrase: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8c82ff',
+    // 词跟随主题前景色；其余三类用固定色相以便区分。
+    // 注意不能用 --accent：深色主题下它就是 --text，短语会和词同色。
+    word: cssVar('--text', '#fdfcfc'),
+    phrase: '#8c82ff',
     article: '#5dcaa5',
     material: '#ef9f27',
   };
+  const ink = {
+    label: cssVar('--text-secondary', 'rgba(253,252,252,0.6)'),
+    labelHi: cssVar('--text', '#fdfcfc'),
+    edge: cssVar('--accent', '#8c82ff'),  // 连线跟随主题前景色，深浅主题都可读
+  };
 
-  graphState = { nodes, links, byId, ctx, W, H, palette, drag: null, hover: null, selected: null };
+  graphState = {
+    nodes, links, byId, ctx, canvas, W, H, S, kx, ky,
+    toSX, toSY, toLX, toLY, palette, ink,
+    drag: null, hover: null, selected: null,
+    physics: true, last: 0, alpha: 1,
+  };
 
-  // ---- 物理迭代（弹簧 + 斥力），在动画帧里逐步收敛
-  function tick() {
+  function tick(ts) {
+    const st = graphState;
+    if (!st) return;
+    // 按真实帧间隔归一化，并**子步进**：
+    // 无头浏览器 / 后台标签页的 rAF 会掉到 30fps，此时 dt=2，
+    // 一步走两帧的距离会过冲 → 图抖动不收敛。拆成两个 dt/2 的子步。
+    const raw = st.last ? Math.min(3, (ts - st.last) / 16.667) : 1;
+    st.last = ts;
+    const steps = raw > 1.25 ? 2 : 1;
+    for (let i = 0; i < steps; i++) step(raw / steps);
+
+    // 退火：力随时间衰减到 0 → 图必然收敛并静止
+    st.alpha *= Math.pow(PHYS.alphaDecay, raw);
+    if (st.alpha < PHYS.alphaMin) {
+      st.alpha = 0;
+      st.physics = false;
+    }
+  }
+
+  function step(dt) {
     const st = graphState;
     if (!st) return;
     const { nodes, links } = st;
-    const k = 0.02;
-    // 斥力
+    // 退火系数：所有力整体衰减（命名避开循环里的节点变量 a）
+    const cool = st.alpha;
+    const S = st.S, PAD = PHYS.padding;
+
+    // 斥力（软化 + 封顶）
     for (let i = 0; i < nodes.length; i++) {
       const a = nodes[i];
       for (let j = i + 1; j < nodes.length; j++) {
         const b = nodes[j];
-        let dx = b.x - a.x, dy = b.y - a.y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 < 1) { d2 = 1; dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
-        const f = 900 / d2;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d2 = Math.max(PHYS.softMin2, dx * dx + dy * dy);
         const d = Math.sqrt(d2);
+        const f = Math.min(PHYS.maxRepForce, PHYS.repulsion / d2);
         const fx = (dx / d) * f, fy = (dy / d) * f;
-        a.vx -= fx; a.vy -= fy;
-        b.vx += fx; b.vy += fy;
+        a.vx -= fx * cool; a.vy -= fy * cool;
+        b.vx += fx * cool; b.vy += fy * cool;
       }
     }
     // 弹簧
     for (const l of links) {
       const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
       const d = Math.max(1, Math.hypot(dx, dy));
-      const f = (d - 70) * k * Math.min(2, l.w / 5);
+      const f = (d - PHYS.springLen) * PHYS.springK * Math.min(2, l.w / 5);
       const fx = (dx / d) * f, fy = (dy / d) * f;
-      l.s.vx += fx; l.s.vy += fy;
-      l.t.vx -= fx; l.t.vy -= fy;
+      l.s.vx += fx * cool; l.s.vy += fy * cool;
+      l.t.vx -= fx * cool; l.t.vy -= fy * cool;
     }
-    // 向心 + 阻尼
+
+    const damp = Math.pow(PHYS.damping, dt);
     for (const n of nodes) {
-      n.vx += (st.W / 2 - n.x) * 0.0016;
-      n.vy += (st.H / 2 - n.y) * 0.0016;
-      n.vx *= 0.86; n.vy *= 0.86;
+      // 向心（把整张图收在物理域中央）。
+      // 注意：向心也必须乘 cool。否则退火后期斥力已经衰减到 0、向心力还在
+      // 全强度工作，整张图会被一路勒到中心缩成一小团。所有力按同一系数衰减，
+      // 布局形状才与 alpha 无关。
+      n.vx += (PAD + S / 2 - n.x) * PHYS.centerPull * cool;
+      n.vy += (PAD + S / 2 - n.y) * PHYS.centerPull * cool;
+      // 孤立节点的环形锚定
+      if (n.homeK) {
+        n.vx += (n.homeX - n.x) * n.homeK * cool;
+        n.vy += (n.homeY - n.y) * n.homeK * cool;
+      }
       if (st.drag === n) { n.vx = 0; n.vy = 0; continue; }
-      n.x += n.vx; n.y += n.vy;
-      n.x = Math.max(20, Math.min(st.W - 20, n.x));
-      n.y = Math.max(20, Math.min(st.H - 20, n.y));
+
+      n.vx *= damp; n.vy *= damp;
+      // 速度封顶：没有这一条，单帧位移能到几千像素，节点直接弹飞撞墙
+      const sp = Math.hypot(n.vx, n.vy);
+      if (sp > PHYS.maxSpeed) {
+        n.vx = (n.vx / sp) * PHYS.maxSpeed;
+        n.vy = (n.vy / sp) * PHYS.maxSpeed;
+      }
+      n.x += n.vx * dt; n.y += n.vy * dt;
+
+      // 柔性边界：越界回推，而不是硬裁剪贴边
+      if (n.x < PAD) { n.vx += (PAD - n.x) * 0.08 * cool; n.x = PAD; }
+      else if (n.x > PAD + S) { n.vx -= (n.x - (PAD + S)) * 0.08 * cool; n.x = PAD + S; }
+      if (n.y < PAD) { n.vy += (PAD - n.y) * 0.08 * cool; n.y = PAD; }
+      else if (n.y > PAD + S) { n.vy -= (n.y - (PAD + S)) * 0.08 * cool; n.y = PAD + S; }
     }
   }
 
@@ -2524,57 +2671,91 @@ async function drawGraph() {
     const { ctx, W, H, nodes, links, palette } = st;
     ctx.clearRect(0, 0, W, H);
 
-    ctx.lineWidth = 0.6;
+    // 连线：用主题强调色 + globalAlpha，避免写死 rgba 在浅色主题下失效
+    ctx.lineWidth = 0.7;
+    ctx.strokeStyle = st.ink.edge;
     for (const l of links) {
       const near = st.hover && (l.s === st.hover || l.t === st.hover);
-      ctx.strokeStyle = near ? 'rgba(140,130,255,0.75)' : 'rgba(140,130,255,0.16)';
+      ctx.globalAlpha = near ? 0.7 : 0.14;
       ctx.beginPath();
-      ctx.moveTo(l.s.x, l.s.y);
-      ctx.lineTo(l.t.x, l.t.y);
+      ctx.moveTo(st.toSX(l.s.x), st.toSY(l.s.y));
+      ctx.lineTo(st.toSX(l.t.x), st.toSY(l.t.y));
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
 
     for (const n of nodes) {
-      const base = n.type === 'word' ? 3 : 5;
-      const r = base + Math.min(9, Math.sqrt(n.deg) * 1.7) + Math.min(5, n.weight * 0.25);
+      const base = NODE_BASE_R[n.type] || 4;
+      const r = base + Math.min(6.5, Math.sqrt(n.deg) * 1.5) + Math.min(4.5, n.weight * 0.35);
       const isHi = n === st.hover || n === st.selected;
       ctx.beginPath();
-      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.arc(st.toSX(n.x), st.toSY(n.y), r, 0, Math.PI * 2);
       ctx.fillStyle = palette[n.type] || '#888';
-      ctx.globalAlpha = isHi ? 1 : 0.82;
+      ctx.globalAlpha = isHi ? 1 : 0.85;
       ctx.fill();
       ctx.globalAlpha = 1;
       if (isHi) {
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = palette.word;
         ctx.stroke();
       }
     }
 
-    // 只给权重高的节点画标签，避免糊成一片
-    const labeled = nodes.filter(n => n.deg >= 3 || n.weight >= 2).slice(0, 70);
+    // 标签：按重要性排序 + 简易占位检测，避免糊成一团
     ctx.font = '11px ui-monospace, monospace';
     ctx.textAlign = 'center';
-    for (const n of labeled) {
-      ctx.fillStyle = n === st.hover ? '#fff' : 'rgba(253,252,252,0.55)';
-      ctx.fillText(n.label.slice(0, 16), n.x, n.y - 9 - Math.min(6, n.deg * 0.4));
+    ctx.textBaseline = 'alphabetic';
+    const ranked = nodes
+      .filter(n => n.deg >= 2 || n.weight >= 2 || n.type === 'article' || n.type === 'material')
+      .sort((a, b) => (b.deg + b.weight) - (a.deg + a.weight))
+      .slice(0, 60);
+    const placed = [];
+    for (const n of ranked) {
+      const text = n.label.slice(0, 18);
+      const w = ctx.measureText(text).width;
+      const px = st.toSX(n.x), py = st.toSY(n.y);
+      const y = py - 9 - Math.min(6, n.deg * 0.4);
+      const hi = n === st.hover;
+      const box = { x: px, y: y - 9, w: w + 6, h: 13 };
+      let clash = false;
+      for (const p of placed) {
+        if (Math.abs(p.x - box.x) < (p.w + box.w) / 2 &&
+            Math.abs(p.y - box.y) < (p.h + box.h) / 2) { clash = true; break; }
+      }
+      if (clash && !hi) continue;
+      placed.push(box);
+      ctx.fillStyle = hi ? st.ink.labelHi : st.ink.label;
+      ctx.fillText(text, px, y);
     }
   }
 
-  function loop() {
-    if (!graphState) return;
-    tick();
+  function loop(ts) {
+    graphRAF = 0;
+    const st = graphState;
+    if (!st) return;
+    // 已经离开图谱页（canvas 被 innerHTML 换掉）→ 彻底停掉，不要空转
+    if (!st.canvas.isConnected) { graphState = null; return; }
+    if (st.physics) tick(ts);
     render();
-    requestAnimationFrame(loop);
+    if (st.physics) graphRAF = requestAnimationFrame(loop);
   }
 
-  // ---- 交互：悬停高亮 + 拖拽
-  function pick(x, y) {
+  // 唤醒：需要重新计算物理时传 true，只是重绘（悬停高亮）就不必
+  function kick(physics) {
+    const st = graphState;
+    if (!st) return;
+    if (physics) { st.physics = true; st.last = 0; st.alpha = Math.max(st.alpha, 0.6); }
+    if (!graphRAF) graphRAF = requestAnimationFrame(loop);
+  }
+
+  // 命中测试：把屏幕坐标换回物理域再比距离
+  function pick(sx, sy) {
     const st = graphState;
     if (!st) return null;
+    const lx = st.toLX(sx), ly = st.toLY(sy);
     let best = null, bestD = 400;
     for (const n of st.nodes) {
-      const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+      const d = (n.x - lx) ** 2 + (n.y - ly) ** 2;
       if (d < bestD) { bestD = d; best = n; }
     }
     return best;
@@ -2590,13 +2771,15 @@ async function drawGraph() {
     if (!st) return;
     const [x, y] = localPos(e);
     if (st.drag) {
-      st.drag.x = x; st.drag.y = y;
+      st.drag.x = st.toLX(x); st.drag.y = st.toLY(y);
+      kick(true);
       return;
     }
     const hit = pick(x, y);
-    st.hover = hit;
+    if (hit !== st.hover) { st.hover = hit; kick(false); }
     canvas.style.cursor = hit ? 'pointer' : 'default';
     const tip = $('#graphTip');
+    if (!tip) return;
     if (hit) {
       tip.style.display = 'block';
       tip.style.left = (x + 14) + 'px';
@@ -2616,19 +2799,30 @@ async function drawGraph() {
     if (!st) return;
     const [x, y] = localPos(e);
     const hit = pick(x, y);
-    if (hit) { st.drag = hit; st.selected = hit; }
+    if (hit) { st.drag = hit; st.selected = hit; kick(true); }
   };
 
-  window.onmouseup = () => { if (graphState) graphState.drag = null; };
+  canvas.onmouseup = () => {
+    const st = graphState;
+    if (st && st.drag) { st.drag = null; kick(true); }
+  };
 
   canvas.onmouseleave = () => {
-    if (graphState) graphState.hover = null;
+    const st = graphState;
+    if (!st) return;
+    st.hover = null;
+    kick(false);
     const tip = $('#graphTip');
     if (tip) tip.style.display = 'none';
   };
 
-  if (!graphState._looping) {
-    graphState._looping = true;
-    loop();
-  }
+  graphRAF = requestAnimationFrame(loop);
 }
+
+// 容器尺寸变化（窗口缩放 / 侧边栏折叠）后重新定尺寸。
+// 只注册一次，避免每次进图谱页都叠加监听。
+window.addEventListener('resize', () => {
+  if (!graphState) return;
+  clearTimeout(graphResizeTimer);
+  graphResizeTimer = setTimeout(() => { if (graphState) drawGraph(); }, 220);
+});

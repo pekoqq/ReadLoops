@@ -20,3 +20,8 @@ __pycache__/
 
 # MinerU 独立环境（体积大，不入库）
 tools/mineru-env/
+
+# 构建产物
+dist/
+build/
+*.egg-info/
