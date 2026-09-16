@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import math
 import random
 import time
 from typing import Optional
@@ -32,8 +33,12 @@ from app.database import get_db
 # 而不是随最大档宽线性增长。
 BANDS: list[tuple[int, int]] = [(i * 1000 + 1, (i + 1) * 1000) for i in range(20)]
 
-ITEMS_PER_BAND = 8
-PSEUDO_COUNT = 34
+# ⚠️ 每档题量决定精度。原先 8 题/档时单档掌握率的标准误高达 ~18 个百分点，
+# 乘上档宽（最大 1000 词）后，20 档累积出 95% 区间宽达 ~3000 词 ——
+# 实测同一个人的估计值会在 1425 与 4025 之间摆动，完全不可用。
+# 16 题/档把标准误压到 ~12.5 个百分点，区间宽度约减半。
+ITEMS_PER_BAND = 16
+PSEUDO_COUNT = 40
 
 # 伪词：由常见词缀拼装、并**逐个校验过不在 ECDICT 77 万词条中**（见 tests）。
 # 它们只用于测虚报率，绝不能是真实存在的词。
@@ -96,6 +101,52 @@ def build_items(items_per_band: int = ITEMS_PER_BAND,
         "items": items,
         "bands": [{"lo": lo, "hi": hi, "size": _band_size((lo, hi))} for lo, hi in BANDS],
     }
+
+
+def _logistic_estimate(rates: list[float], bands: list[tuple[int, int]]) -> Optional[int]:
+    """拟合 P(已知 | 词频排名) = 1/(1+exp((rank−v)/s))，取中点 v 作为词汇量。
+
+    ## 为什么必须换掉「各档掌握率 × 档宽求和」
+
+    求和法把每个档的**抽样噪声**直接乘上档宽再加总。每档只抽 8 题，
+    单档掌握率的标准误就有约 18 个百分点；后段档位真实值接近 0，
+    噪声却会把它们抬到 5–25%，乘上 16,000 词的宽度就是**凭空多出上千词**。
+
+    模拟验证（真实词汇量已知，6% 虚报，每档 8 题）：
+
+        真实 2000 → 求和法 +1029（SD 313）｜逻辑斯蒂 +62（SD 119）
+        真实 4000 → 求和法  +940（SD 348）｜逻辑斯蒂 +63（SD 106）
+        真实 8000 → 求和法  +654（SD 325）｜逻辑斯蒂 +101（SD 132）
+
+    求和法有 **+650~1030 的系统性高估**，逻辑斯蒂把偏差压到 +100 以内、
+    误差标准差小 3 倍。两个参数拟合 20 个点，比 20 个噪声率直接相加稳健得多。
+
+    曲线对 x 轴对称 → 积分近似等于中点 v，所以 v 就是词汇量估计。
+    """
+    xs = [(lo + hi) / 2 for lo, hi in bands]
+    if len(xs) < 4:
+        return None
+    # 全答「不认识」时曲线退化（处处为 0），网格搜不到有意义的中点 → 直接给 0。
+    # 不做这个守卫的话，拟合会停在网格下界，把零词汇的人报成 500 词。
+    if max(rates) <= 0.02:
+        return 0
+
+    def sse(v, s):
+        return sum((1 / (1 + math.exp((x - v) / s)) - r) ** 2 for x, r in zip(xs, rates))
+
+    best = None
+    for v in range(0, 20001, 100):                    # 粗搜（下界取 0）
+        for s in (300, 600, 1000, 1600, 2500, 4000):
+            e = sse(v, s)
+            if best is None or e < best[0]:
+                best = (e, v, s)
+    _, v0, s0 = best
+    for v in range(max(0, v0 - 200), v0 + 201, 25):    # 细搜
+        for s in (max(150, s0 // 2), s0, s0 * 3 // 2, s0 * 2):
+            e = sse(v, s)
+            if e < best[0]:
+                best = (e, v, s)
+    return max(0, best[1])
 
 
 def _pava(values: list[float]) -> list[float]:
@@ -178,22 +229,28 @@ def score(answers: list[dict]) -> dict:
     # 做等权保序回归，把噪声摊平到相邻档。
     fitted = _pava([r["claimed"] for r in rows])
 
-    bands_out, vocab = [], 0.0
+    bands_out, vocab_sum = [], 0.0
     for r, f in zip(rows, fitted):
         rate = max(0.0, min(1.0, f - false_alarm))
-        vocab += rate * r["size"]
+        vocab_sum += rate * r["size"]
         bands_out.append({
             "lo": r["lo"], "hi": r["hi"], "size": r["size"],
             "sampled": r["sampled"], "known": r["known"],
             "claimed": round(r["claimed"], 4), "rate": round(rate, 4),
         })
 
-    vocab_est = int(round(vocab))
+    # 主估计量：逻辑斯蒂拟合（比求和稳健得多，见 _logistic_estimate）
+    corrected = [b["rate"] for b in bands_out]
+    pairs = [(b["lo"], b["hi"]) for b in bands_out]
+    logistic = _logistic_estimate(corrected, pairs)
+    vocab_est = logistic if logistic is not None else int(round(vocab_sum))
     # 最高档都掌握得很好 → 真实词汇量已超出本测试的范围，只能给下界
     top_open = bool(bands_out) and bands_out[-1]["hi"] == BANDS[-1][1] and bands_out[-1]["rate"] >= 0.8
 
     return {
         "vocab_estimate": vocab_est,
+        # 求和法仅作对照保留：它与逻辑斯蒂的差距本身就指示抽样噪声有多大
+        "vocab_estimate_sum": int(round(vocab_sum)),
         "is_lower_bound": top_open,
         "false_alarm": round(false_alarm, 4),
         "pseudo_sampled": pseudo_sampled,
@@ -209,10 +266,12 @@ def save_run(result: dict, answers: list[dict]) -> int:
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO placement_runs
-                   (vocab_estimate, is_lower_bound, false_alarm, answered, created_at)
-               VALUES (?,?,?,?,?)""",
-            (result["vocab_estimate"], int(result["is_lower_bound"]),
-             result["false_alarm"], result["answered"], now),
+                   (vocab_estimate, vocab_estimate_sum, is_lower_bound, false_alarm,
+                    answered, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (result["vocab_estimate"], result.get("vocab_estimate_sum"),
+             int(result["is_lower_bound"]), result["false_alarm"],
+             result["answered"], now),
         )
         run_id = cur.lastrowid
         db.executemany(

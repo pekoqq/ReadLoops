@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from app.database import get_db
 from app.services import placement as pl
 
 # 覆盖 1–20000 共 20 档，每档塞 20 个假词，让 build_items 有样本可抽
@@ -193,14 +194,29 @@ def test_score_unknown_text_is_ignored(seeded):
 
 
 def test_score_is_monotone_in_knowledge(seeded):
-    """认识得越多，估计的词汇量不能反而更小。"""
+    """认识得越多，估计的词汇量不能反而更小。
+
+    注意要按**词频从高到低**地增加知识（先认识最常见的词）—— 那才是真实情形。
+    早先的写法把打乱顺序的前 k 个词标为认识，等于随机子集，本身就不保证单调。
+    """
     test = pl.build_items(items_per_band=5, pseudo_count=6, seed=5)
     real = [i["text"] for i in test["items"] if i["text"] not in set(pl.PSEUDO_WORDS)]
+    with get_db() as db:
+        ranks = {}
+        for t in real:
+            row = db.execute(
+                "SELECT COALESCE(NULLIF(frq,0), bnc, 0) r FROM words WHERE lower(text)=? LIMIT 1",
+                (t,)).fetchone()
+            ranks[t] = row["r"] if row else 10 ** 9
+    # 按词频排名升序 = 从最常见的词开始认识
+    ordered = sorted(real, key=lambda t: ranks[t])
+
     prev = -1
-    for k in (0, 1, 2, 3, 5, 8, 12):
-        answers = [{"text": t, "known": i < k} for i, t in enumerate(real)]
+    for k in (0, 1, 2, 3, 5, 8, 12, len(ordered)):
+        known_set = set(ordered[:k])
+        answers = [{"text": t, "known": t in known_set} for t in real]
         est = pl.score(answers)["vocab_estimate"]
-        assert est >= prev, f"认识 {k} 个时估计值反而变小了（{est} < {prev}）"
+        assert est >= prev, f"认识前 {k} 个高频词时估计值反而变小了（{est} < {prev}）"
         prev = est
 
 

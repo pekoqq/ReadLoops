@@ -239,6 +239,7 @@ CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_id);
 CREATE TABLE IF NOT EXISTS placement_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     vocab_estimate INTEGER NOT NULL,
+    vocab_estimate_sum INTEGER,          -- 旧的求和法结果，仅作对照（指示抽样噪声）
     is_lower_bound INTEGER DEFAULT 0,   -- 最高档也掌握得很好 → 估计值只是下界
     false_alarm REAL DEFAULT 0,         -- 伪词虚报率（自评高估的校正项）
     answered INTEGER DEFAULT 0,
@@ -303,6 +304,7 @@ COLUMN_MIGRATIONS = {
     },
     "placement_runs": {
         "source": "TEXT DEFAULT 'placement'",
+        "vocab_estimate_sum": "INTEGER",
     },
     "tests": {
         "status": "TEXT DEFAULT 'in_progress'",

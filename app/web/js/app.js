@@ -2571,13 +2571,14 @@ function renderPlacementIntro() {
        和选词，都以这次结果为起点。</p>
     <div class="placement-intro">
       <div class="placement-howto">
-        <div class="placement-step"><b>1</b><span>逐页勾选你<b>认识</b>的单词，不确定的就别勾</span></div>
+        <div class="placement-step"><b>1</b><span>逐页勾选你<b>认识</b>的单词 —— 看到词能想起意思就算，不必会拼写</span></div>
         <div class="placement-step"><b>2</b><span>词从最常用到最生僻分成 20 档，每档都抽了几道</span></div>
-        <div class="placement-step"><b>3</b><span>里面混有少量<b>不存在的词</b>，用来校正自评偏高 —— 请照实作答</span></div>
+        <div class="placement-step"><b>3</b><span>里面混有少量<b>不存在的词</b>，用来校正自评偏高 —— 照实作答即可</span></div>
         <div class="placement-step"><b>4</b><span>做完给出词汇量估计，以及离四级/六级/考研/雅思还差多少词</span></div>
       </div>
       <div class="placement-warn">
-        这是<b>识别</b>测试：只要看到词能想起意思就算「认识」，不需要会拼写。
+        这是<b>识别</b>测试：只要看到词能想起意思就算「认识」，不需要会拼写。<br>
+        <b>常见的词请务必勾上</b> —— 漏勾一个最常见档位的词，会让最终结果偏差上千词。
       </div>
       <div class="placement-actions">
         <button class="toolbar-btn primary large" id="placementStart">开始测试</button>
@@ -2614,7 +2615,7 @@ function renderPlacementPage() {
       <div class="placement-progress-bar"><span style="width:${pct}%"></span></div>
       <div class="placement-progress-text">第 ${placementPage + 1} / ${total} 页 · 已勾选 ${placementKnown.size} 个</div>
     </div>
-    <div class="placement-hint">勾选你<b>认识</b>的词（看到能想起意思即可）</div>
+    <div class="placement-hint">勾选你<b>认识</b>的词（看到能想起意思即可，不必会拼写）</div>
     <div class="placement-grid">
       ${pageItems.map((it, i) => `
         <label class="placement-word ${placementKnown.has(it.text) ? 'known' : ''}" data-word="${escapeHtml(it.text)}">
@@ -2625,7 +2626,7 @@ function renderPlacementPage() {
     <div class="placement-nav">
       <button class="toolbar-btn" id="placementPrev" ${placementPage === 0 ? 'disabled' : ''}>上一页</button>
       <button class="toolbar-btn primary" id="placementNext">${isLast ? '提交并查看结果' : '下一页'}</button>
-      <span class="placement-tip">不确定的不要勾 —— 混在里面的假词会揭穿猜测</span>
+      <span class="placement-tip">一时想不起来的就别勾；但<b>眼熟能想起意思的一定要勾</b></span>
     </div>
   `;
 
