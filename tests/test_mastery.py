@@ -382,3 +382,73 @@ def test_phrases_without_dictionary_source_are_excluded(env):
     assert "high school" in picked, "有词典来源的短语应当可选"
     assert "young people" not in picked, "无来源的短语不该被选中"
     assert "new study" not in picked
+
+
+# ---------------------------------------------------------------- 闭环：recognized → 提取练习
+
+def test_recognized_words_are_testable(env):
+    """⚠️ 闭环回归：`recognized` 的词必须能被测试选中。
+
+    此前它们陷入死角：选词算法排除它们（该做提取练习而非继续输入，这是对的），
+    但 smart_test 的权重只看 status/查词/对错次数，**完全不知道 m_level** ——
+    于是「认得出来但考不出来」的词既不被输入也不被考，永久卡在中间。
+    """
+    from app.services.smart_test import generate_smart_test
+
+    with get_db() as db:
+        # 造 4 个 recognized 的词（有释义，可出题）
+        db.executemany(
+            """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
+                                  frq, m_level, created_at, updated_at)
+               VALUES (?,?,?,'word',?,'CET4',0,'new',?, 'recognized',0,0)""",
+            [(60, "alpha", "alpha", "甲", 500), (61, "beta", "beta", "乙", 600),
+             (62, "gamma", "gamma", "丙", 700), (63, "delta", "delta", "丁", 800)],
+        )
+    qs = generate_smart_test(count=4, source="recognized")
+    assert len(qs) == 4, f"recognized 源应当能出题，实际 {len(qs)} 道"
+    assert all("word" in q for q in qs)
+
+
+def test_recalled_words_are_downweighted_in_adaptive(env):
+    """已经想得起来的词不该占测试题目。"""
+    from app.services.smart_test import calculate_word_weight
+
+    base = {"status": "learning", "lookup_count": 0, "wrong_count": 0,
+            "correct_count": 0, "srs_stability": 0, "last_test_at": 0,
+            "exchange": None, "m_level": "unknown"}
+    recognized = calculate_word_weight({**base, "m_level": "recognized"})
+    recalled = calculate_word_weight({**base, "m_level": "recalled"})
+    unknown = calculate_word_weight({**base, "m_level": "unknown"})
+    assert recognized > unknown, "recognized 的词应当比未接触的更该被考"
+    assert recalled < unknown, "recalled 的词应当被压低"
+
+
+def test_smart_test_no_longer_depends_on_phrases_table(env):
+    """⚠️ 回归：旧的 phrases 表已废弃，测试出题不能再依赖它。"""
+    import inspect
+
+    from app.services import smart_test
+    src = inspect.getsource(smart_test)
+    assert "FROM phrases" not in src, "smart_test 不应再查询已废弃的 phrases 表"
+
+
+def test_mastery_must_be_cleared_when_evidence_disappears(env):
+    """⚠️ 闭环回归：证据消失时等级必须跟着回退。
+
+    典型场景：删除文章会连带删除它产生的遇见记录（v2.5.2 的修复）。
+    如果那是某个词唯一的证据，它的 m_level 就该回到 unknown。
+    而 refresh() 只挑「有证据的词」，失去证据的词进不来 —— 会永久卡在旧等级上
+    （实测 abandon 就被这么卡住过）。
+    """
+    _see(3, [1, 2, 3, 4])          # 4 次干净遇见 → recognized
+    mastery.refresh([3])
+    assert mastery.explain(3)["level"] == "recognized"
+
+    # 模拟「文章被删」：遇见记录被连带清掉
+    with get_db() as db:
+        db.execute("DELETE FROM word_encounters WHERE word_id=3")
+    mastery.refresh()
+    assert mastery.explain(3)["level"] == "unknown", "证据没了，等级必须回退"
+    with get_db() as db:
+        row = db.execute("SELECT m_level, m_recognize, m_recall FROM words WHERE id=3").fetchone()
+    assert row["m_level"] == "unknown" and row["m_recognize"] == 0 and row["m_recall"] == 0

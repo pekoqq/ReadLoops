@@ -263,7 +263,21 @@ def refresh(word_ids: Optional[list[int]] = None) -> dict:
                 "UPDATE words SET m_recognize=?, m_recall=?, m_level=?, m_updated=? WHERE id=?",
                 updates,
             )
-    return {"processed": len(updates), "by_level": counts}
+
+        # ⚠️ 证据会**消失**，此时等级必须跟着回退。
+        # 典型场景：删除文章会连带删除它产生的遇见记录（v2.5.2 的修复）——
+        # 如果那是某个词唯一的证据，它的 m_level 就该回到 unknown。
+        # 而上面的查询只挑「有证据的词」，失去全部证据的词根本进不来，
+        # 于是永久卡在旧等级上（实测 abandon 就是被这么卡住的）。
+        ph = ",".join("?" * len(updates)) if updates else None
+        stale_sql = ("UPDATE words SET m_recognize=0, m_recall=0, m_level='unknown', m_updated=? "
+                     "WHERE m_level != 'unknown'")
+        params: tuple = (now,)
+        if ph:
+            stale_sql += f" AND id NOT IN ({ph})"
+            params = (now, *[u[4] for u in updates])
+        cleared = db.execute(stale_sql, params).rowcount
+    return {"processed": len(updates), "cleared": max(0, cleared), "by_level": counts}
 
 
 def refresh_all() -> dict:

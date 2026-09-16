@@ -1,4 +1,4 @@
-"""数据库结构测试：确保全新安装即可用（10 表 + 完整列）。"""
+"""数据库结构测试：确保全新安装即可用。"""
 from app import config
 from app.database import get_db
 
@@ -11,8 +11,8 @@ EXPECTED_TABLES = {
     "reading_sessions",
     "tests",
     "settings",
-    "phrases",
     "test_questions",
+    # 注：phrases 已废弃，短语并入 words（type='phrase'），不再单独建表
 }
 
 EXPECTED_WORD_COLUMNS = {

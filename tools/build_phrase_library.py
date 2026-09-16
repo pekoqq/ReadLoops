@@ -74,9 +74,14 @@ def main():
         if freq < 3:
             continue
         try:
+            # 短语已并入 words（type='phrase'），与单词共享学习状态。
+            # 注意：这里**不写释义** —— 释义必须来自真实词典，
+            # 由 tools/enrich_phrases.py 补齐，绝不在生成阶段编造。
             cursor.execute(
-                "INSERT OR IGNORE INTO phrases (text, frequency, level, created_at) VALUES (?, ?, 'CET4', ?)",
-                (phrase, freq, now)
+                """INSERT OR IGNORE INTO words
+                   (lemma, text, type, level, frequency, status, source, created_at, updated_at)
+                   VALUES (?, ?, 'phrase', 'CET4', ?, 'new', 'phrase_library', ?, ?)""",
+                (phrase, phrase, freq, now, now)
             )
             inserted += 1
         except Exception:
@@ -85,7 +90,7 @@ def main():
     conn.commit()
 
     # 统计
-    total = cursor.execute("SELECT COUNT(*) FROM phrases").fetchone()[0]
+    total = cursor.execute("SELECT COUNT(*) FROM words WHERE type='phrase'").fetchone()[0]
     print(f"短语库共 {total} 个短语")
 
     # 显示 TOP 20

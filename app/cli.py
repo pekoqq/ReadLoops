@@ -29,15 +29,18 @@ def cmd_init(args):
     with get_db() as conn:
         tables = [r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
-        words = conn.execute("SELECT COUNT(*) FROM words").fetchone()[0]
-        phrases = conn.execute("SELECT COUNT(*) FROM phrases").fetchone()[0]
+        words = conn.execute("SELECT COUNT(*) FROM words WHERE type='word'").fetchone()[0]
+        phrases = conn.execute("SELECT COUNT(*) FROM words WHERE type='phrase'").fetchone()[0]
+        phr_done = conn.execute(
+            "SELECT COUNT(*) FROM words WHERE type='phrase' AND meaning_source IS NOT NULL"
+        ).fetchone()[0]
 
     print("ReadLoops 初始化完成")
     print(f"  数据目录：{config.DATA_DIR}")
     print(f"  数据库　：{config.DB_PATH}")
     print(f"  已建表　：{len(tables)} 张")
     print(f"  词库　　：{words} 词")
-    print(f"  短语库　：{phrases} 条")
+    print(f"  短语库　：{phrases} 条（其中有词典释义 {phr_done} 条）")
 
     if words == 0:
         print()

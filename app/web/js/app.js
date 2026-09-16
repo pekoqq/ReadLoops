@@ -1831,9 +1831,10 @@ function renderTestHome() {
             <div class="test-type-name">测验词复习</div>
             <div class="test-type-desc">只考查过2次的目标词</div>
           </div>
-          <div class="test-type-card disabled" data-type="grammar">
-            <div class="test-type-name">语法测试</div>
-            <div class="test-type-desc">即将上线</div>
+          <div class="test-type-card ${testConfig.type === 'recognized' ? 'active' : ''}"
+               data-type="recognized">
+            <div class="test-type-name">待提取练习${srs && srs.recognized_pending ? ` · ${srs.recognized_pending}` : ''}</div>
+            <div class="test-type-desc">认得出来但还考不出来的词 —— 该做提取了</div>
           </div>
         </div>
       </div>
@@ -1937,7 +1938,8 @@ async function startSrsReview() {
 }
 
 async function startTest() {
-  const sourceMap = { vocab: 'adaptive', learning: 'vocab', target: 'target' };
+  const sourceMap = { vocab: 'adaptive', learning: 'vocab', target: 'target',
+                      recognized: 'recognized' };
   const source = sourceMap[testConfig.type] || 'adaptive';
   try {
     // 创建测试记录
@@ -2040,7 +2042,8 @@ function renderTestResult() {
   else if (pct >= 50) { level = '及格'; levelColor = '#fbbf24'; }
   else { level = '需加强'; levelColor = '#ff6b6b'; }
 
-  const typeNames = { vocab: '词汇量测试', learning: '生词复习', target: '测验词复习' };
+  const typeNames = { vocab: '词汇量测试', learning: '生词复习', target: '测验词复习',
+                      recognized: '待提取练习' };
   const diffNames = { easy: '简单', medium: '中等', hard: '困难', mixed: '混合' };
 
   $('#reader').innerHTML = `

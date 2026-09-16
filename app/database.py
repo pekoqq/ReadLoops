@@ -127,14 +127,9 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 
-CREATE TABLE IF NOT EXISTS phrases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    text TEXT UNIQUE NOT NULL,
-    meaning TEXT,
-    frequency INTEGER DEFAULT 0,
-    level TEXT DEFAULT 'CET4',
-    created_at INTEGER
-);
+-- 注：此前的 phrases 表已废弃。短语并入 words（type='phrase'），
+-- 从此与单词共享遇见跟踪、掌握度、FSRS 与选词 —— 见 tools/migrate_phrases_into_words.py。
+-- 新建库不再创建该表；老库由迁移工具负责 DROP。
 
 CREATE TABLE IF NOT EXISTS test_questions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,7 +224,6 @@ CREATE TABLE IF NOT EXISTS graph_edges (
 CREATE INDEX IF NOT EXISTS idx_words_status ON words(status);
 CREATE INDEX IF NOT EXISTS idx_words_level ON words(level);
 CREATE INDEX IF NOT EXISTS idx_words_text ON words(text);
-CREATE INDEX IF NOT EXISTS idx_phrases_level ON phrases(level);
 CREATE INDEX IF NOT EXISTS idx_test_questions_test_id ON test_questions(test_id);
 CREATE INDEX IF NOT EXISTS idx_test_questions_word_id ON test_questions(word_id);
 CREATE INDEX IF NOT EXISTS idx_books_status ON books(status);

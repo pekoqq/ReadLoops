@@ -29,6 +29,16 @@ def calculate_word_weight(word):
     wrong_count = word['wrong_count'] or 0
     weight *= (1 + wrong_count * 1.0)
 
+    # ---- 掌握度（这是把「提取练习」接进闭环的关键）----
+    # 此前权重只看 status / 查词 / 对错次数，完全不知道掌握度等级 ——
+    # 于是 m_level='recognized'（认得出来但考不出来）的词陷入了死角：
+    # 它们被选词算法排除（该去做提取练习），却也不会被测试选中。
+    lvl = (word['m_level'] if 'm_level' in word.keys() else None) or 'unknown'
+    if lvl == 'recognized':
+        weight *= 3.0      # 正是最该做提取的时候
+    elif lvl == 'recalled':
+        weight *= 0.15     # 已经想得起来，别浪费题目
+
     # 测试正确次数：对得多降低权重
     correct_count = word['correct_count'] or 0
     if correct_count > 0:
@@ -91,6 +101,7 @@ def generate_smart_test(count=20, source='adaptive'):
       - adaptive: 自适应（基于用户数据权重抽样，默认）
       - vocab: 仅生词本
       - target: 仅测验词
+      - recognized: 仅「认得出来但考不出来」的词 —— 该做提取练习的那一批
       - all: 全部词库（随机）
     """
     with get_db() as conn:
@@ -98,19 +109,21 @@ def generate_smart_test(count=20, source='adaptive'):
         if source == 'adaptive':
             # 自适应：生词本 + 测验词 + 查词≥1的词 + CET4高频词补充
             candidates = conn.execute("""
-                SELECT id, text, meaning, exchange, status, lookup_count,
+                SELECT id, text, meaning, exchange, status, lookup_count, m_level,
                        wrong_count, correct_count, srs_stability, last_test_at, level
                 FROM words
                 WHERE meaning IS NOT NULL AND meaning != ''
                   AND (status IN ('learning', 'target')
                        OR lookup_count >= 1
-                       OR level = 'CET4')
+                       -- level='CET4' 只有在「单词」上才代表基础词表；
+                       -- 短语迁移时也带了 CET4，靠它混进词汇量测试会变成考搭配
+                       OR (type = 'word' AND level = 'CET4'))
                 ORDER BY lookup_count DESC, wrong_count DESC
                 LIMIT 500
             """).fetchall()
         elif source == 'vocab':
             candidates = conn.execute("""
-                SELECT id, text, meaning, exchange, status, lookup_count,
+                SELECT id, text, meaning, exchange, status, lookup_count, m_level,
                        wrong_count, correct_count, srs_stability, last_test_at, level
                 FROM words
                 WHERE status = 'learning' AND meaning IS NOT NULL AND meaning != ''
@@ -118,15 +131,28 @@ def generate_smart_test(count=20, source='adaptive'):
             """).fetchall()
         elif source == 'target':
             candidates = conn.execute("""
-                SELECT id, text, meaning, exchange, status, lookup_count,
+                SELECT id, text, meaning, exchange, status, lookup_count, m_level,
                        wrong_count, correct_count, srs_stability, last_test_at, level
                 FROM words
                 WHERE status = 'target' AND meaning IS NOT NULL AND meaning != ''
                 LIMIT 500
             """).fetchall()
+        elif source == 'recognized':
+            # 「认得出来但考不出来」= m_level='recognized'
+            # 依据 Pellicer-Sánchez (2015)：8 次语境遇见能建立 86% 词形识别 / 75% 意义识别，
+            # 但回忆只有 55% —— 这批词再怎么读也难变成「想得起来」，必须做提取练习。
+            # 选词算法把它们排除出文章目标是**对的**，但此前没有任何地方接手，
+            # 于是它们卡死在中间。这个源就是接手的那一环。
+            candidates = conn.execute("""
+                SELECT id, text, meaning, exchange, status, lookup_count, m_level,
+                       wrong_count, correct_count, srs_stability, last_test_at, level
+                FROM words
+                WHERE m_level = 'recognized' AND meaning IS NOT NULL AND meaning != ''
+                LIMIT 500
+            """).fetchall()
         else:
             candidates = conn.execute("""
-                SELECT id, text, meaning, exchange, status, lookup_count,
+                SELECT id, text, meaning, exchange, status, lookup_count, m_level,
                        wrong_count, correct_count, srs_stability, last_test_at, level
                 FROM words
                 WHERE meaning IS NOT NULL AND meaning != ''
@@ -140,12 +166,6 @@ def generate_smart_test(count=20, source='adaptive'):
             ORDER BY RANDOM() LIMIT 200
         """).fetchall()
 
-        # 短语库
-        phrases = conn.execute("""
-            SELECT text, frequency FROM phrases
-            WHERE frequency >= 3 ORDER BY frequency DESC LIMIT 100
-        """).fetchall()
-
     # 按权重抽样
     selected = weighted_sample(candidates, count)
 
@@ -153,7 +173,7 @@ def generate_smart_test(count=20, source='adaptive'):
     result = []
     for word in selected:
         question_type = choose_question_type(word)
-        question = generate_question(word, question_type, all_words, phrases)
+        question = generate_question(word, question_type, all_words)
         if question:
             result.append(question)
 
@@ -176,7 +196,13 @@ def choose_question_type(word):
         return 'word_to_meaning'
 
 
-def generate_question(word, question_type, all_words, phrases):
+def generate_question(word, question_type, all_words):
+    """生成一道题。
+
+    短语不需要特殊处理 —— 它们已经是 words 表里的行（type='phrase'），
+    有 text 有 meaning，`word_to_meaning` 对它们天然适用。
+    这也是为什么旧的 phrases 表查询可以整段删掉：它的数据现在与 words 同源。
+    """
     """生成一道题。"""
     meaning = word['meaning']
     text = word['text']

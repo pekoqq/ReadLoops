@@ -76,6 +76,10 @@ def main() -> int:
         )
         conn.commit()
 
+    # 迁移完成后废弃旧表 —— 留着就是第二份事实源，迟早不一致。
+    conn.execute("DROP TABLE IF EXISTS phrases")
+    conn.commit()
+
     total = conn.execute("SELECT COUNT(*) FROM words WHERE type='phrase'").fetchone()[0]
     words = conn.execute("SELECT COUNT(*) FROM words WHERE type='word'").fetchone()[0]
     print(f"迁入 {len(todo)} 条短语（跳过已存在的 {len(have)} 条）")

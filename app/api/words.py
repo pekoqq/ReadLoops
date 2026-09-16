@@ -270,7 +270,13 @@ async def batch_update_status(req: BatchStatusRequest):
 @router.get("/test/generate")
 async def generate_test(count: int = 20, difficulty: str = "mixed", source: str = "adaptive"):
     """生成单词测试题。
-    source: adaptive(自适应/基于用户数据)/vocab(生词本)/target(测验词)/all(全部随机)
+
+    source:
+      adaptive   自适应（基于用户数据权重抽样，默认）
+      vocab      仅生词本
+      target     仅测验词
+      recognized 仅「认得出来但考不出来」的词（m_level='recognized'）
+      all        全部词库随机
     """
     from app.services.smart_test import generate_smart_test
     return generate_smart_test(count, source)
@@ -322,7 +328,14 @@ async def get_review_due(limit: int = 50):
 
 @router.get("/srs-stats")
 async def get_srs_stats():
-    """获取 FSRS 统计概览。"""
+    """获取 FSRS 统计概览 + 待提取练习数量。"""
     from app.services.srs import get_review_stats
     with get_db() as conn:
-        return get_review_stats(conn)
+        stats = get_review_stats(conn)
+        # 「认得出来但考不出来」的词 —— 它们被选词算法排除（该做提取而非输入），
+        # 必须有一个入口把它们送到测试里，否则会卡死在中间。
+        stats["recognized_pending"] = conn.execute(
+            "SELECT COUNT(*) FROM words WHERE m_level = 'recognized' "
+            "AND meaning IS NOT NULL AND meaning != ''"
+        ).fetchone()[0]
+    return stats
