@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "readloops"
-version = "2.6.5"
+version = "2.6.6"
 description = "AI 驱动的英语阅读训练器：可理解输入 + FSRS 间隔重复"
 readme = "README.md"
 requires-python = ">=3.10"

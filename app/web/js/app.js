@@ -2554,15 +2554,15 @@ async function loadMaterials() {
 // 定级测试的状态。分页勾选而不是逐词作答：194 道题逐个点要 300+ 次交互，
 // 分页（每页 16 个）只要 13 次翻页，实测 3–4 分钟能做完。
 let placementItems = [];
-// Map<词, boolean>：每个词都必须显式作答（true=认识 / false=不认识）。
+// Set：勾选了「认识」的词。没勾的算「不认识」。
 //
-// ⚠️ 这里踩过一个代价很大的坑：最初用「勾选框」语义，点一次切换一次。
-// 结果**双击 / 手快连点会触发两次 toggle，把刚勾上的词又取消掉** ——
-// 实测双击卡片后 `placementKnown` 里就没有这个词了。
-// 用户以为自己勾了，数据里却是「不认识」，于是估计值完全失真
-// （实测 common 词 few/patient/certain/april 被记成「不认识」）。
-// 改成「两个按钮、点击只设置状态」后，重复点击是幂等的，不可能误取消。
-let placementAnswers = null;
+// ⚠️ 这里踩过一个代价很大的坑：纯 toggle 语义下，**双击 / 手快连点会触发两次
+// toggle，把刚勾上的词又取消掉**，且没有任何提示 —— 实测用户勾过的
+// few/patient/certain/april 被静默取消，估计值完全失真。
+// 我先改成「每个词两个按钮、必须点完才能翻页」，结果**用户根本做不下去**
+// （太累，失去了原来顺手的节奏）。最终方案：**保留勾选，只给同一张卡片加
+// 点击防抖** —— 快速点击不同词不受影响，只有对同一卡片的重复点击被忽略。
+let placementKnown = null;
 let placementPage = 0;
 const PLACEMENT_PAGE_SIZE = 16;
 
@@ -2601,7 +2601,7 @@ async function startPlacement() {
   $('#reader').innerHTML = '<div class="kb-loading">正在生成测试卷…</div>';
   const data = await api.get('/api/placement/items');
   placementItems = data.items || [];
-  placementAnswers = new Map();
+  placementKnown = new Set();
   placementPage = 0;
   if (!placementItems.length) {
     $('#reader').innerHTML = '<h1>词汇量定级</h1><p class="kb-sub">题库为空，请先导入词库。</p>';
@@ -2615,70 +2615,56 @@ function renderPlacementPage() {
   const start = placementPage * PLACEMENT_PAGE_SIZE;
   const pageItems = placementItems.slice(start, start + PLACEMENT_PAGE_SIZE);
   const isLast = placementPage >= total - 1;
-  const answered = placementAnswers.size;
-  const pct = Math.round((answered / placementItems.length) * 100);
-  const pageUnanswered = pageItems.filter(it => !placementAnswers.has(it.text)).length;
+  const pct = Math.round((placementKnown.size / placementItems.length) * 100);
 
   $('#reader').innerHTML = `
     <h1>词汇量定级</h1>
     <div class="placement-progress">
       <div class="placement-progress-bar"><span style="width:${pct}%"></span></div>
-      <div class="placement-progress-text">第 ${placementPage + 1} / ${total} 页 · 已作答 ${answered} / ${placementItems.length}${pageUnanswered ? ` · 本页还剩 <b>${pageUnanswered}</b> 个` : ' · 本页已完成 ✓'}</div>
+      <div class="placement-progress-text">第 ${placementPage + 1} / ${total} 页 · 已勾选 ${placementKnown.size} 个</div>
     </div>
-    <div class="placement-hint">每个词都要选一个 —— <b>认识</b>：看到能想起意思即可，不必会拼写</div>
+    <div class="placement-hint">勾选你<b>认识</b>的词（看到能想起意思即可，不必会拼写）—— 没勾的会算作「不认识」</div>
     <div class="placement-grid">
-      ${pageItems.map((it, i) => {
-        const ans = placementAnswers.get(it.text);
-        return `
-        <div class="placement-word ${ans === true ? 'yes' : ans === false ? 'no' : ''}" data-word="${escapeHtml(it.text)}">
-          <span class="pw-text">${escapeHtml(it.text)}</span>
-          <span class="pw-actions">
-            <button class="pw-btn pw-yes ${ans === true ? 'on' : ''}" data-v="1" title="认识">认识</button>
-            <button class="pw-btn pw-no ${ans === false ? 'on' : ''}" data-v="0" title="不认识">不认识</button>
-          </span>
-        </div>`;
-      }).join('')}
+      ${pageItems.map(it => `
+        <label class="placement-word ${placementKnown.has(it.text) ? 'known' : ''}" data-word="${escapeHtml(it.text)}">
+          <input type="checkbox" ${placementKnown.has(it.text) ? 'checked' : ''}>
+          <span>${escapeHtml(it.text)}</span>
+        </label>`).join('')}
     </div>
     <div class="placement-nav">
       <button class="toolbar-btn" id="placementPrev" ${placementPage === 0 ? 'disabled' : ''}>上一页</button>
-      <button class="toolbar-btn primary" id="placementNext" ${pageUnanswered ? 'disabled' : ''}>
-        ${isLast ? '提交并查看结果' : '下一页'}
-      </button>
-      <span class="placement-tip">${pageUnanswered ? '本页还有未作答的词' : '一时想不起来的选「不认识」；但眼熟能想起意思的一定选「认识」'}</span>
+      <button class="toolbar-btn primary" id="placementNext">${isLast ? '提交并查看结果' : '下一页'}</button>
+      <span class="placement-tip">一时想不起来的就别勾；但<b>常见词一定要勾</b> —— 漏勾会让结果偏差上千词</span>
     </div>
   `;
 
-  // 点击**只设置状态**，不切换 —— 重复点击是幂等的，不会误取消
-  $$('.placement-word .pw-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const card = btn.closest('.placement-word');
-      const w = card.dataset.word;
-      const val = btn.dataset.v === '1';
-      placementAnswers.set(w, val);
-      card.classList.toggle('yes', val);
-      card.classList.toggle('no', !val);
-      card.querySelectorAll('.pw-btn').forEach(b =>
-        b.classList.toggle('on', (b.dataset.v === '1') === val));
-      renderProgressOnly();
+  $$('.placement-word').forEach(el => {
+    let lastClick = 0;   // 防抖：同一个小卡片 350ms 内只接受一次点击
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      // ⚠️ 这里曾经有个致命 bug：用纯 toggle 语义时，**双击 / 手快连点会触发两次
+      // toggle，把刚勾上的词又取消掉**，而且没有任何提示 —— 实测用户勾过的
+      // few/patient/certain/april 全被静默取消，估计值完全失真。
+      // 修法不是改成「每个词都要点按钮」（那样太累，用户根本做不完），
+      // 而是**给同一张卡片加点击防抖**：你点得快也是在点不同的词，不受影响；
+      // 只有对同一张卡片的重复点击会被忽略。
+      const now = performance.now();
+      if (now - lastClick < 350) return;
+      lastClick = now;
+
+      const w = el.dataset.word;
+      if (placementKnown.has(w)) { placementKnown.delete(w); el.classList.remove('known'); }
+      else { placementKnown.add(w); el.classList.add('known'); }
+      const cb = el.querySelector('input');
+      if (cb) cb.checked = placementKnown.has(w);
+      const counter = $('.placement-progress-text');
+      if (counter) {
+        counter.textContent = `第 ${placementPage + 1} / ${total} 页 · 已勾选 ${placementKnown.size} 个`;
+        const bar = $('.placement-progress-bar span');
+        if (bar) bar.style.width = Math.round(placementKnown.size / placementItems.length * 100) + '%';
+      }
     });
   });
-
-  function renderProgressOnly() {
-    const n = placementAnswers.size;
-    const left = pageItems.filter(it => !placementAnswers.has(it.text)).length;
-    const box = $('.placement-progress-text');
-    if (box) {
-      box.innerHTML = `第 ${placementPage + 1} / ${total} 页 · 已作答 ${n} / ${placementItems.length}`
-        + (left ? ` · 本页还剩 <b>${left}</b> 个` : ' · 本页已完成 ✓');
-    }
-    const bar = $('.placement-progress-bar span');
-    if (bar) bar.style.width = Math.round(n / placementItems.length * 100) + '%';
-    const next = $('#placementNext');
-    if (next) next.disabled = left > 0;
-    const tip = $('.placement-tip');
-    if (tip) tip.textContent = left ? '本页还有未作答的词' : '一时想不起来的选「不认识」；但眼熟能想起意思的一定选「认识」';
-  }
 
   const prev = $('#placementPrev');
   if (prev) prev.addEventListener('click', () => { if (placementPage > 0) { placementPage--; renderPlacementPage(); } });
@@ -2691,15 +2677,9 @@ function renderPlacementPage() {
 
 async function submitPlacement() {
   $('#reader').innerHTML = '<div class="kb-loading">正在计算…</div>';
-  // 每个词都必须有显式作答；理论上到不了这里（下一页在未答完时是禁用的），
-  // 真出现了就按「不认识」算并提示，绝不静默丢弃。
-  const missing = placementItems.filter(it => !placementAnswers.has(it.text));
-  if (missing.length) {
-    toast(`还有 ${missing.length} 个词未作答，已按「不认识」计入`);
-  }
   const answers = placementItems.map(it => ({
     text: it.text,
-    known: placementAnswers.get(it.text) === true,
+    known: placementKnown.has(it.text),
   }));
   try {
     const r = await api.post('/api/placement/submit', { answers });
