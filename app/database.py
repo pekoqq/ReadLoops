@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS words (
     --   user    用户在界面里手动 / AI 补录的（只有这种才允许真删）
     -- 「删除」不该把一本词典里的词抠掉 —— 用户想表达的是「别让我再学它了」。
     source TEXT DEFAULT 'user',
+    -- 释义来源。短语的释义必须来自真实词典，**不允许 AI 生成** ——
+    -- 编造的搭配释义学习者分辨不出来，比没有释义更糟。
+    -- ecdict / wikipedia / wiktionary；NULL 表示暂无词典收录（不是词汇单位，应剔除）
+    meaning_source TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -301,6 +305,7 @@ COLUMN_MIGRATIONS = {
         "m_level": "TEXT DEFAULT 'unknown'",
         "m_updated": "INTEGER",
         "source": "TEXT DEFAULT 'user'",
+        "meaning_source": "TEXT",
     },
     "placement_runs": {
         "source": "TEXT DEFAULT 'placement'",

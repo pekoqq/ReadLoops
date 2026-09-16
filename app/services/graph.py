@@ -202,10 +202,13 @@ def rebuild(include_words: bool = True, include_phrases: bool = True,
                              "m_level": r["m_level"] or "unknown",
                              "status": r["status"]},
                 }
-            # 补足语境用的高频短语
+            # 补足语境用的高频短语。
+            # 要求有词典来源 —— 没被任何词典收录的多词组合不是词汇单位，
+            # 画进图里只是噪声（这也顺带把短语节点数量压下来）。
             for r in db.execute(
                 """SELECT id, text, meaning, level, frequency, m_level, status
                    FROM words WHERE type = 'phrase' AND frequency >= 8
+                     AND meaning_source IS NOT NULL
                    ORDER BY frequency DESC LIMIT ?""",
                 (max_nodes,),
             ).fetchall():

@@ -61,8 +61,12 @@ _KIND_WHERE = {
     "word": ("type = 'word' AND meaning IS NOT NULL AND meaning != '' "
              "AND text GLOB '[a-z]*' AND text NOT LIKE '% %' "
              "AND length(text) BETWEEN 3 AND 18"),
+    # 短语额外要求「有词典来源的释义」。查不到来源说明它不是词汇单位
+    # （只是碰巧连在一起的高频词，如 `young people` / `new study`），
+    # 就不该硬造释义去教 —— 见 tools/enrich_phrases.py 的说明。
     "phrase": ("type = 'phrase' AND text LIKE '% %' "
-               "AND length(text) BETWEEN 5 AND 40"),
+               "AND length(text) BETWEEN 5 AND 40 "
+               "AND meaning IS NOT NULL AND meaning != ''"),
 }
 # 排序用的「有效频次」——**两者语义相反，必须归一化**：
 #   单词 frq/bnc 是 COCA 排名：**越小越高频**

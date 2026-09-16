@@ -295,11 +295,11 @@ def test_phrases_are_selected_from_their_own_pool(env):
         db.executemany(
             """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
                                   frq, created_at, updated_at)
-               VALUES (?,?,?,'phrase','',? ,?,'new',0,0,0)""",
-            [(10, "high school", "high school", "CET4", 30),
-             (11, "long term", "long term", "CET4", 25),
-             (12, "years ago", "years ago", "CET4", 20),
-             (13, "s and s", "s and s", "CET4", 3)],   # 低于频次下限，应被挡掉
+               VALUES (?,?,?,'phrase',? ,? ,?,'new',0,0,0)""",
+            [(10, "high school", "high school", "中学", "CET4", 30),
+             (11, "long term", "long term", "长期的", "CET4", 25),
+             (12, "years ago", "years ago", "多年前", "CET4", 20),
+             (13, "s and s", "s and s", "释义", "CET4", 3)],   # 低于频次下限，应被挡掉
         )
         db.execute("UPDATE words SET type='word' WHERE text='rare'")
     mastery.refresh()
@@ -319,10 +319,10 @@ def test_phrase_ranking_is_by_frequency_descending(env):
         db.executemany(
             """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
                                   frq, created_at, updated_at)
-               VALUES (?,?,?,'phrase','',? ,?,'new',0,0,0)""",
-            [(20, "high school", "high school", "CET4", 33),
-             (21, "medium term", "medium term", "CET4", 15),
-             (22, "low term", "low term", "CET4", 5)],
+               VALUES (?,?,?,'phrase',? ,? ,?,'new',0,0,0)""",
+            [(20, "high school", "high school", "中学", "CET4", 33),
+             (21, "medium term", "medium term", "中期", "CET4", 15),
+             (22, "low term", "low term", "低期", "CET4", 5)],
         )
     mastery.refresh()
     picked = selection.select_new_words(3, exam="cet4", kind="phrase")
@@ -360,3 +360,25 @@ def test_phrase_encounter_is_tracked_like_words(env):
     e = mastery.explain(40)
     assert e["evidence"]["干净遇见（见过但没查）"] == 1
     assert e["level"] == "seen"
+
+
+def test_phrases_without_dictionary_source_are_excluded(env):
+    """⚠️ 关键约束：查不到词典来源的短语**不能被当作词汇单位去教**。
+
+    `young people` / `new study` 这类只是碰巧连在一起的高频词，任何词典都没有它们的
+    条目 —— 硬造释义就是「凭空创造」，学习者分辨不出来。所以选词时必须排除。
+    """
+    with get_db() as db:
+        db.executemany(
+            """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
+                                  frq, meaning_source, created_at, updated_at)
+               VALUES (?,?,?,'phrase',?,'CET4',?,'new',0,?,0,0)""",
+            [(50, "high school", "high school", "中学", 30, "ecdict"),
+             (51, "young people", "young people", "", 28, None),      # 无来源
+             (52, "new study", "new study", "", 26, None)],          # 无来源
+        )
+    mastery.refresh()
+    picked = selection.select_new_words(10, exam="cet4", kind="phrase")
+    assert "high school" in picked, "有词典来源的短语应当可选"
+    assert "young people" not in picked, "无来源的短语不该被选中"
+    assert "new study" not in picked
