@@ -1468,7 +1468,7 @@ function updateVocabToolbar() {
  * 15.8% 的 token，剩下 84% 是基础词与功能词，拿词表百分比当「能读懂多少」会严重失真。
  * 这里显示的是按词频档位加权的**真实覆盖率**，也就是 i+1 判据本身。
  */
-function renderVocabGap(g) {
+function renderVocabGap(g, examSel, mastery) {
   const cov = g.coverage && g.coverage.CET4 && g.coverage.CET4.available ? g.coverage.CET4 : null;
   const c6 = g.coverage && g.coverage.CET6 && g.coverage.CET6.available ? g.coverage.CET6 : null;
   const pct = (v) => (v * 100).toFixed(1);
@@ -1540,22 +1540,50 @@ function renderVocabGap(g) {
       ${gauge}
 
       <div class="gap-exams">
-        <div class="meter-title">各考试缺口</div>
+        <div class="gap-exam-head">
+          <span class="meter-title" style="margin:0">各考试缺口</span>
+          ${examSel ? `
+          <label class="gap-exam-pick">
+            <span>目标考试</span>
+            <select id="targetExamSelect">
+              ${examSel.options.map(o => `<option value="${o.key}" ${o.key === examSel.exam ? 'selected' : ''}>${o.label}</option>`).join('')}
+            </select>
+          </label>` : ''}
+        </div>
+        <div class="gap-exam-note">目标考试决定下一篇埋哪些词 —— 缺口的缩小速度由它导向。</div>
         <div class="gap-exam-list">${exams}</div>
         <div class="gap-eta">${etaLine}</div>
       </div>
+
+      ${mastery ? `
+      <div class="gap-mastery">
+        <div class="meter-title">掌握度分布（识别与回忆分开计）</div>
+        <div class="gap-mastery-note">
+          依据 <b>Pellicer-Sánchez (2015)</b>：8 次语境遇见能建立 <b>86% 词形识别 / 75% 意义识别</b>，
+          但回忆只有 <b>55%</b>。所以「认得出来」和「想得起来」分开记 ——
+          前者该继续输入，后者才该去做提取练习。
+        </div>
+        <div class="gap-mastery-grid">
+          <div><b>${mastery.by_level.seen}</b><span>见过面</span></div>
+          <div><b>${mastery.by_level.recognized}</b><span>认得出来</span></div>
+          <div><b>${mastery.by_level.recalled}</b><span>想得起来</span></div>
+        </div>
+      </div>` : ''}
     </div>
   `;
 }
 
 async function loadStats() {
-  const [s, activity, reentry, placement, gap] = await Promise.all([
+  const [s, activity, reentry, placement, gap, examSel, mastery] = await Promise.all([
     api.get('/api/stats/overview'),
     api.get('/api/stats/activity?weeks=26'),
     api.get('/api/stats/reentry?limit=12').catch(() => ({ summary: null, items: [] })),
     api.get('/api/placement/summary').catch(() => ({ has_result: false })),
     api.get('/api/stats/vocab-gap').catch(() => null),
+    api.get('/api/stats/target-exam').catch(() => null),
+    api.get('/api/stats/mastery').catch(() => null),
   ]);
+  window._targetExam = examSel; window._mastery = mastery;
   const mins = Math.floor(s.total_reading_seconds / 60);
   const hours = Math.floor(mins / 60);
   const timeStr = hours > 0 ? `${hours}小时${mins % 60}分` : `${mins}分钟`;
@@ -1571,7 +1599,7 @@ async function loadStats() {
     <h1>学习统计</h1>
 
     <!-- 词汇差距（本轮新增：把「提升词汇量」变成可计算的闭环）-->
-    ${gap ? renderVocabGap(gap) : ''}
+    ${gap ? renderVocabGap(gap, examSel, mastery) : ''}
 
     <!-- 概览卡片 -->
     <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
@@ -2662,6 +2690,13 @@ function renderPlacementResult(r, fromSummary) {
       </div>
     </div>
   `;
+  const sel = $('#targetExamSelect');
+  if (sel) sel.addEventListener('change', async (e) => {
+    await api.post('/api/stats/target-exam', { exam: e.target.value });
+    toast(`目标考试已切换为「${e.target.selectedOptions[0].text}」`);
+    loadStats();
+  });
+
   const retake = $('#placementRetake');
   if (retake) retake.addEventListener('click', () => {
     if (confirm('重新测试会覆盖上一次的定级结果，继续？')) startPlacement();

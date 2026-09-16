@@ -223,6 +223,12 @@ def save_run(result: dict, answers: list[dict]) -> int:
              for b in result["bands"]],
         )
         _mark_mastery(db, answers, now)
+    # 定级声明是掌握度模型里的强先验，保存后统一重算
+    try:
+        from app.services import mastery
+        mastery.refresh()
+    except Exception:
+        pass
     return run_id
 
 

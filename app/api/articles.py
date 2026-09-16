@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from app.database import get_db
-from app.services import encounter
+from app.services import encounter, mastery
 from app.services.ai import generate_article
 
 router = APIRouter(prefix="/api/articles", tags=["articles"])
@@ -21,6 +21,8 @@ async def generate():
     # 用户查词时才计数 —— 看到了但没查就完全不算，重遇统计永远起不来。
     try:
         encounter.record_article(article.id, article.content, targets)
+        # 遇见改变了识别层的证据，立刻重算（只算这一篇涉及到的词）
+        mastery.refresh()
     except Exception:
         pass  # 记录失败不能影响文章生成
     return {

@@ -105,125 +105,19 @@ def _get_recent_used_words(limit=50):
 
 
 def _select_new_words(target_count):
-    """从词库中选择生词（FSRS 驱动）。
+    """挑这一篇要埋的目标生词。
 
-    优先级：
-    1. 今天到期复习的词（srs_due <= now）— 最高优先级
-    2. 快到期的词（srs_due 在未来3天内）— 高优先级
-    3. 记忆强度低的词（srs_stability < 10）— 中优先级
-    4. status='target' 的词（查过2次）
-    5. status='learning' 的词（生词本）
-    6. 从词库选择（优先 CET4、有释义、避免最近重复）
+    已迁到 `app/services/selection.py` —— 旧实现只按 FSRS 到期 + 词频选词，
+    不知道「哪些词已经掌握了」「你的目标考试是什么」「某个词已经见过几篇」，
+    于是统计页算出的缺口和下一篇读什么毫无关系。新实现按掌握度分层：
+
+        到期复习 → 重遇缺口（见过但识别未建立）→ 目标考试新词（高频优先）→ 兜底
+
+    并明确排除 `recalled`（已经能想起来，不该再占生词额度）。
     """
-    import time
-    now = int(time.time())
-    three_days = now + 3 * 86400
-    recent_used = _get_recent_used_words(30)  # 最近30篇用过的词不重复
-
-    with get_db() as conn:
-        selected = []
-
-        # 1. 今天到期复习的词（FSRS 驱动）
-        due_rows = conn.execute(
-            "SELECT text FROM words WHERE status IN ('learning','target') "
-            "AND srs_due <= ? AND srs_stability IS NOT NULL "
-            "ORDER BY srs_due ASC LIMIT ?",
-            (now, target_count),
-        ).fetchall()
-        selected.extend([r["text"] for r in due_rows])
-
-        # 2. 快到期的词（未来3天内）
-        if len(selected) < target_count:
-            exclude = selected
-            placeholders = ",".join(["?"] * len(exclude)) if exclude else "''"
-            soon_rows = conn.execute(
-                f"SELECT text FROM words WHERE status IN ('learning','target') "
-                f"AND srs_due > ? AND srs_due <= ? "
-                f"AND text NOT IN ({placeholders}) "
-                f"ORDER BY srs_due ASC LIMIT ?",
-                (now, three_days, *exclude, target_count - len(selected)),
-            ).fetchall()
-            selected.extend([r["text"] for r in soon_rows])
-
-        # 3. 记忆强度低的词
-        if len(selected) < target_count:
-            exclude = list(set(selected))
-            placeholders = ",".join(["?"] * len(exclude)) if exclude else "''"
-            low_stab_rows = conn.execute(
-                f"SELECT text FROM words WHERE status IN ('learning','target') "
-                f"AND srs_stability < 10 AND srs_stability IS NOT NULL "
-                f"AND text NOT IN ({placeholders}) "
-                f"ORDER BY srs_stability ASC LIMIT ?",
-                (*exclude, target_count - len(selected)),
-            ).fetchall()
-            selected.extend([r["text"] for r in low_stab_rows])
-
-        # 4. target 词（查过2次的词）
-        if len(selected) < target_count:
-            exclude = list(set(selected))
-            placeholders = ",".join(["?"] * len(exclude)) if exclude else "''"
-            target_rows = conn.execute(
-                f"SELECT text FROM words WHERE status='target' "
-                f"AND text NOT IN ({placeholders}) "
-                f"ORDER BY lookup_count DESC LIMIT ?",
-                (*exclude, target_count - len(selected)),
-            ).fetchall()
-            selected.extend([r["text"] for r in target_rows])
-
-        # 5. 生词本中的词
-        if len(selected) < target_count:
-            exclude = list(set(selected))
-            placeholders = ",".join(["?"] * len(exclude)) if exclude else "''"
-            learning_rows = conn.execute(
-                f"SELECT text FROM words WHERE status='learning' "
-                f"AND text NOT IN ({placeholders}) "
-                f"ORDER BY lookup_count DESC LIMIT ?",
-                (*exclude, target_count - len(selected)),
-            ).fetchall()
-            selected.extend([r["text"] for r in learning_rows])
-
-        # 6. 从词库选择（优先 CET4 级别、有释义、长度适中、排除最近重复）
-        if len(selected) < target_count:
-            exclude = list(set(selected) | recent_used)
-            placeholders = ",".join(["?"] * len(exclude)) if exclude else "''"
-            cet4_rows = conn.execute(
-                f"SELECT text FROM words "
-                f"WHERE level='CET4' AND meaning IS NOT NULL AND meaning != '' "
-                f"AND length(text) BETWEEN 4 AND 10 "
-                f"AND text NOT IN ({placeholders}) "
-                f"ORDER BY RANDOM() LIMIT ?",
-                (*exclude, target_count - len(selected)),
-            ).fetchall()
-            selected.extend([r["text"] for r in cet4_rows])
-
-            # CET4 不够的话，从全部有释义的词里补
-            if len(selected) < target_count:
-                exclude2 = list(set(selected) | recent_used)
-                placeholders2 = ",".join(["?"] * len(exclude2)) if exclude2 else "''"
-                random_rows = conn.execute(
-                    f"SELECT text FROM words "
-                    f"WHERE meaning IS NOT NULL AND meaning != '' "
-                    f"AND length(text) BETWEEN 4 AND 12 "
-                    f"AND text NOT IN ({placeholders2}) "
-                    f"ORDER BY RANDOM() LIMIT ?",
-                    (*exclude2, target_count - len(selected)),
-                ).fetchall()
-                selected.extend([r["text"] for r in random_rows])
-
-            # 还不够就放宽条件
-            if len(selected) < target_count:
-                exclude3 = list(set(selected) | recent_used)
-                placeholders3 = ",".join(["?"] * len(exclude3)) if exclude3 else "''"
-                fallback_rows = conn.execute(
-                    f"SELECT text FROM words "
-                    f"WHERE length(text) BETWEEN 3 AND 15 "
-                    f"AND text NOT IN ({placeholders3}) "
-                    f"ORDER BY RANDOM() LIMIT ?",
-                    (*exclude3, target_count - len(selected)),
-                ).fetchall()
-                selected.extend([r["text"] for r in fallback_rows])
-
-    return selected[:target_count]
+    from app.services import selection
+    recent_used = _get_recent_used_words(30)
+    return selection.select_new_words(target_count=target_count, exclude=recent_used)
 
 
 def _generate_once(topic, opening, ending, new_words):

@@ -2,11 +2,11 @@
 import time
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.services import encounter, vocab_gap
+from app.services import encounter, mastery, selection, vocab_gap
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
@@ -282,3 +282,27 @@ def vocab_gap_overview():
     from app.services import placement as pl
     pl.ensure_default_run()
     return vocab_gap.overview()
+
+
+@router.get("/stats/target-exam")
+def get_target_exam():
+    """当前目标考试。"""
+    return {"exam": selection.target_exam(),
+            "label": selection.EXAM_LABELS.get(selection.target_exam(), ""),
+            "options": [{"key": k, "label": v} for k, v in selection.EXAM_LABELS.items()]}
+
+
+@router.post("/stats/target-exam")
+def set_target_exam(payload: dict):
+    """设置目标考试 —— 它决定下一篇埋哪些词。"""
+    exam = str(payload.get("exam", "")).strip()
+    if not selection.set_target_exam(exam):
+        raise HTTPException(status_code=400, detail=f"不支持的考试：{exam}")
+    return {"ok": True, "exam": exam,
+            "label": selection.EXAM_LABELS.get(exam, "")}
+
+
+@router.get("/stats/mastery")
+def mastery_stats():
+    """掌握度分布：识别 vs 回忆分开统计。"""
+    return mastery.stats()

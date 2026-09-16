@@ -46,7 +46,14 @@ CREATE TABLE IF NOT EXISTS words (
     bnc INTEGER DEFAULT 0,            -- BNC 词频排名
     collins INTEGER,                  -- 柯林斯星级 1–5
     oxford INTEGER DEFAULT 0,         -- 是否牛津核心 3000 词
-    mastered INTEGER DEFAULT 0,       -- 0=未测 / 1=掌握 / 2=未掌握（定级测试与 FSRS 维护）
+    mastered INTEGER DEFAULT 0,       -- 0=未测 / 1=掌握 / 2=未掌握（定级测试声明）
+    -- 掌握度模型（app/services/mastery.py）：识别与回忆分开累积 log-odds。
+    -- 依据 Pellicer-Sánchez (2015)：8 次遇见只能带来 86% 形式识别 / 75% 意义识别 /
+    -- 55% 回忆 —— 识别与回忆的证据强度差一个量级，合成一个数会把两者都毁掉。
+    m_recognize REAL DEFAULT 0,       -- 识别层 log-odds
+    m_recall REAL DEFAULT 0,          -- 回忆层 log-odds
+    m_level TEXT DEFAULT 'unknown',   -- unknown / seen / recognized / recalled
+    m_updated INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -283,6 +290,10 @@ COLUMN_MIGRATIONS = {
         "collins": "INTEGER",
         "oxford": "INTEGER DEFAULT 0",
         "mastered": "INTEGER DEFAULT 0",
+        "m_recognize": "REAL DEFAULT 0",
+        "m_recall": "REAL DEFAULT 0",
+        "m_level": "TEXT DEFAULT 'unknown'",
+        "m_updated": "INTEGER",
     },
     "placement_runs": {
         "source": "TEXT DEFAULT 'placement'",
@@ -309,6 +320,10 @@ def _ensure_columns(conn):
 POST_MIGRATION_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_words_frq ON words(frq);
 CREATE INDEX IF NOT EXISTS idx_words_mastered ON words(mastered);
+CREATE INDEX IF NOT EXISTS idx_words_m_level ON words(m_level);
+-- 表达式索引：选词/定级/覆盖率都用「有效词频 = frq 或 bnc」排序或分档，
+-- 建在 frq 上的普通索引对 COALESCE(NULLIF(frq,0), bnc) 完全用不上。
+CREATE INDEX IF NOT EXISTS idx_words_eff_rank ON words(COALESCE(NULLIF(frq, 0), bnc, 0));
 """
 
 

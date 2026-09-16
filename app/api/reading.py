@@ -45,6 +45,9 @@ async def record_lookup(word_id: int = 0, article_id: int = 0, context: str = ""
                 "VALUES (?, ?, ?, 'lookup', ?)",
                 (word_id, article_id or None, context, now),
             )
+            # 查词是掌握度模型里权重很高的负向证据，立刻重算该词
+            from app.services import mastery
+            mastery.refresh([word_id])
             # 获取当前 lookup_count（更新前）
             row = conn.execute("SELECT lookup_count, status FROM words WHERE id=?", (word_id,)).fetchone()
             if row:

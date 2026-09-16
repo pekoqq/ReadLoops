@@ -3074,3 +3074,25 @@ body.theme-transition *::after {
 .gap-exam-rest { flex: 0 0 74px; font-size: 10px; color: var(--text-tertiary); }
 .gap-eta { margin-top: 14px; font-size: 11px; color: var(--text-tertiary); line-height: 1.8; }
 .gap-eta b { color: var(--text); }
+
+/* ---- 目标考试 / 掌握度 ---- */
+.gap-exam-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 8px; }
+.gap-exam-pick { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); }
+.gap-exam-pick select {
+  background: var(--glass-strong); color: var(--text);
+  border: 1px solid var(--glass-border-strong); border-radius: var(--radius);
+  padding: 5px 9px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.gap-exam-note { font-size: 10px; color: var(--text-tertiary); margin-bottom: 12px; }
+
+.gap-mastery { margin-top: 26px; }
+.gap-mastery-note { font-size: 11px; color: var(--text-tertiary); line-height: 1.9; margin: 8px 0 14px; max-width: 620px; }
+.gap-mastery-note b { color: var(--text-secondary); }
+.gap-mastery-grid { display: flex; gap: 12px; }
+.gap-mastery-grid > div {
+  flex: 1; padding: 14px 16px; border-radius: var(--radius);
+  border: 1px solid var(--glass-border); background: var(--glass);
+  display: flex; flex-direction: column; gap: 4px; max-width: 200px;
+}
+.gap-mastery-grid b { font-size: 22px; color: var(--text); font-weight: 400; }
+.gap-mastery-grid span { font-size: 11px; color: var(--text-tertiary); }

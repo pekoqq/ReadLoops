@@ -232,6 +232,12 @@ async def submit_test(test_id: int, word_id: int, is_correct: bool, reaction_tim
     """提交单题测试结果。"""
     from app.services.smart_test import submit_test_result
     submit_test_result(test_id, word_id, is_correct, reaction_time)
+    # 答题是掌握度模型里**唯一**能建立「回忆」的证据，立刻重算该词
+    try:
+        from app.services import mastery
+        mastery.refresh([word_id])
+    except Exception:
+        pass
     return {"status": "ok"}
 
 
