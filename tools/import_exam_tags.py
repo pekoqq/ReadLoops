@@ -217,15 +217,15 @@ def add_missing(conn: sqlite3.Connection, path: Path, max_frq: int = 30000) -> d
                 tags, frq, bnc, _int(row.get("collins"), None),
                 1 if (row.get("oxford") or "").strip() else 0,
                 json.dumps(ex, ensure_ascii=False) if ex else None,
-                now, now,
+                "ecdict", now, now,
             ))
 
     if rows:
         conn.executemany(
             """INSERT INTO words (lemma, text, type, meaning, phonetic, level,
                                   tags, frq, bnc, collins, oxford, exchange,
-                                  created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                  source, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             rows,
         )
         conn.commit()

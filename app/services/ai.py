@@ -581,8 +581,9 @@ Return ONLY valid JSON:
                 wid = existing["id"]
             else:
                 cur = conn.execute(
-                    "INSERT INTO words (lemma, text, type, meaning, phonetic, level, created_at, updated_at) "
-                    "VALUES (?, ?, 'word', ?, ?, 'CET4', ?, ?)",
+                    "INSERT INTO words (lemma, text, type, meaning, phonetic, level, source, "
+                    "created_at, updated_at) "
+                    "VALUES (?, ?, 'word', ?, ?, 'CET4', 'ai', ?, ?)",
                     (word, word, meaning, phonetic, now, now),
                 )
                 wid = cur.lastrowid

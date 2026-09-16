@@ -1384,9 +1384,9 @@ async function loadVocab() {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = btn.dataset.id;
-      if (!await confirmDialog('确定删除这个词？', { danger: true })) return;
-      await api.delete(`/api/words/${id}`);
-      toast('已删除');
+      if (!await confirmDialog('把这个词移出生词本？\n（词典条目会保留，学习记录清零）', { danger: true })) return;
+      const r = await api.delete(`/api/words/${id}`);
+      toast(r && r.message ? r.message : '已移出生词本');
       loadVocab();
     });
   });
@@ -1421,9 +1421,9 @@ async function loadVocab() {
   if (batchDel) {
     batchDel.addEventListener('click', async () => {
       if (selectedWordIds.size === 0) { toast('请先选择'); return; }
-      if (!await confirmDialog(`确定删除选中的 ${selectedWordIds.size} 个词？`, { danger: true })) return;
-      await api.post('/api/words/batch-delete', { word_ids: [...selectedWordIds] });
-      toast(`已删除 ${selectedWordIds.size} 个词`);
+      if (!await confirmDialog(`把选中的 ${selectedWordIds.size} 个词移出生词本？\n（词典条目会保留，学习记录清零）`, { danger: true })) return;
+      const r = await api.post('/api/words/batch-delete', { word_ids: [...selectedWordIds] });
+      toast(r && r.message ? r.message : `已移出 ${selectedWordIds.size} 个词`);
       loadVocab();
     });
   }

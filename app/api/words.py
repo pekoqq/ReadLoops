@@ -2,7 +2,7 @@
 import asyncio
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -89,8 +89,8 @@ async def add_word(req: AddWordRequest):
             )
         else:
             cur = conn.execute(
-                "INSERT INTO words (lemma, text, type, meaning, level, status, created_at, updated_at) "
-                "VALUES (?, ?, 'word', ?, 'CET4', 'learning', ?, ?)",
+                "INSERT INTO words (lemma, text, type, meaning, level, status, source, created_at, updated_at) "
+                "VALUES (?, ?, 'word', ?, 'CET4', 'learning', 'user', ?, ?)",
                 (req.word, req.word, req.meaning, now, now),
             )
             word_id = cur.lastrowid
@@ -146,8 +146,9 @@ async def batch_add(req: BatchAddRequest):
             else:
                 conn.execute(
                     """INSERT INTO words
-                       (lemma, text, type, meaning, phonetic, level, status, created_at, updated_at)
-                       VALUES (?, ?, 'word', ?, ?, ?, 'learning', ?, ?)""",
+                       (lemma, text, type, meaning, phonetic, level, status, source,
+                        created_at, updated_at)
+                       VALUES (?, ?, 'word', ?, ?, ?, 'learning', 'user', ?, ?)""",
                     (w, w, meaning, phonetic, level, now, now),
                 )
                 added += 1
@@ -189,23 +190,71 @@ class BatchStatusRequest(BaseModel):
     status: str
 
 
+# 把一个词复位成「词典里的原始条目」：清掉全部学习痕迹，但**保留词条本身**。
+# ⚠️ 这里曾经是 `DELETE FROM words` —— 用户在生词本里点一下删除，就把这个
+# 词从 18.6 万词库里彻底抠掉了（排查数据时发现常见词 percent 就这么没了）。
+# 在生词本里删一个词，用户想表达的是「别让我再学它了」，不是「这本词典别收它」。
+_PRISTINE_SQL = """
+UPDATE words SET
+    status = 'new',
+    encounter_count = 0, lookup_count = 0,
+    wrong_count = 0, correct_count = 0, last_test_at = NULL,
+    srs_due = NULL, srs_stability = 0, srs_difficulty = 0, srs_state = 0,
+    srs_lapses = 0, srs_reps = 0, srs_last_review = NULL, srs_interval = 0,
+    mastered = 0, m_recognize = 0, m_recall = 0, m_level = 'unknown', m_updated = NULL,
+    updated_at = ?
+WHERE id = ?
+"""
+
+
+def _remove_word(conn, word_id: int, now: int) -> str:
+    """从生词本移除一个词。返回 removed（只是移出）/ deleted（真删了）/ missing。
+
+    只有 `source='user'`（用户在界面里自己加的）才真删 —— 那种词本来就不属于词典。
+    其余一律复位，词典条目完好无损。
+    """
+    row = conn.execute("SELECT source FROM words WHERE id=?", (word_id,)).fetchone()
+    if not row:
+        return "missing"
+    conn.execute("DELETE FROM word_encounters WHERE word_id=?", (word_id,))
+    if (row["source"] or "") == "user":
+        conn.execute("DELETE FROM words WHERE id=?", (word_id,))
+        return "deleted"
+    conn.execute(_PRISTINE_SQL, (now, word_id))
+    return "removed"
+
+
 @router.delete("/{word_id}")
 async def delete_word(word_id: int):
-    """删除单个单词（同时删除相关的遇见记录）。"""
+    """把单词移出生词本。
+
+    词典自带的词只是**复位**成未学状态（清除 SRS、查词、测试、掌握度等全部学习痕迹），
+    词条本身保留；只有用户自己添加的词才会被真正删除。
+    """
+    now = int(time.time())
     with get_db() as conn:
-        conn.execute("DELETE FROM word_encounters WHERE word_id=?", (word_id,))
-        conn.execute("DELETE FROM words WHERE id=?", (word_id,))
-    return {"status": "ok"}
+        action = _remove_word(conn, word_id, now)
+    if action == "missing":
+        raise HTTPException(status_code=404, detail="单词不存在")
+    return {"status": "ok", "action": action,
+            "message": "已彻底删除" if action == "deleted" else "已移出生词本（词典条目保留）"}
 
 
 @router.post("/batch-delete")
 async def batch_delete(req: BatchDeleteRequest):
-    """批量删除单词。"""
+    """批量移出生词本。规则同单个删除。"""
+    now = int(time.time())
+    removed = deleted = 0
     with get_db() as conn:
         for wid in req.word_ids:
-            conn.execute("DELETE FROM word_encounters WHERE word_id=?", (wid,))
-            conn.execute("DELETE FROM words WHERE id=?", (wid,))
-    return {"deleted": len(req.word_ids)}
+            action = _remove_word(conn, wid, now)
+            if action == "deleted":
+                deleted += 1
+            elif action == "removed":
+                removed += 1
+    return {"removed": removed, "deleted": deleted,
+            "message": f"移出 {removed} 个（词典条目保留）"
+                       + (f"，彻底删除 {deleted} 个自建词" if deleted else "")}
 
 
 @router.post("/batch-status")

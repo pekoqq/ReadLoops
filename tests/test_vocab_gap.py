@@ -183,3 +183,69 @@ def test_coverage_uses_bnc_when_coca_missing(bands, tmp_path, monkeypatch):
     # bnc=800 落在 1-1000 档（掌握率 1.0）→ 覆盖率应为 100%，而不是 0%
     assert cov["coverage"] == pytest.approx(1.0, abs=0.001)
     vocab_gap.invalidate()
+
+
+# ---------------------------------------------------------------- 生词本删除语义
+
+def test_vocab_delete_keeps_dictionary_entry(seeded_kept):
+    """⚠️ 回归：从生词本删除**不能**把词从词典里抠掉。
+
+    曾经就是这个 bug：用户在生词本点一下删除，`DELETE FROM words` 直接把词
+    从 18.6 万词库里移除了（排查数据时发现常见词 percent 就这么没了）。
+    """
+    from app.api.words import _remove_word
+
+    with get_db() as db:
+        action = _remove_word(db, 1, 0)
+    assert action == "removed"
+    with get_db() as db:
+        row = db.execute("SELECT status, lookup_count, srs_stability, m_level FROM words WHERE id=1").fetchone()
+        assert row is not None, "词典条目必须保留"
+        assert row["status"] == "new"
+        assert row["lookup_count"] == 0
+        assert row["srs_stability"] == 0
+        assert row["m_level"] == "unknown"
+        assert db.execute("SELECT COUNT(*) FROM word_encounters WHERE word_id=1").fetchone()[0] == 0
+
+
+def test_user_added_word_is_really_deleted(seeded_kept):
+    """用户在界面里自己加的词（source='user'）才允许真删。"""
+    from app.api.words import _remove_word
+
+    with get_db() as db:
+        db.execute(
+            """INSERT INTO words (id, lemma, text, meaning, level, frequency, status, source,
+                                  created_at, updated_at)
+               VALUES (900,'myownword','myownword','自建','CET4',0,'learning','user',0,0)""")
+        action = _remove_word(db, 900, 0)
+    assert action == "deleted"
+    with get_db() as db:
+        assert db.execute("SELECT COUNT(*) FROM words WHERE id=900").fetchone()[0] == 0
+
+
+def test_remove_missing_word_is_safe(seeded_kept):
+    from app.api.words import _remove_word
+
+    with get_db() as db:
+        assert _remove_word(db, 999999, 0) == "missing"
+
+
+@pytest.fixture()
+def seeded_kept():
+    """一个带完整学习痕迹的 ecdict 词，用于验证「删除 = 复位」而非「移除」。"""
+    from app.database import get_db
+
+    with get_db() as db:
+        for t in ("word_encounters", "articles", "words", "placement_bands", "placement_runs"):
+            db.execute(f"DELETE FROM {t}")
+        db.execute(
+            """INSERT INTO words (id, lemma, text, meaning, level, frequency, status, source,
+                                  lookup_count, srs_stability, m_level, created_at, updated_at)
+               VALUES (1,'abandon','abandon','放弃','CET4',0,'learning','ecdict',
+                       3, 5.0, 'seen', 0, 0)""")
+        db.execute("INSERT INTO word_encounters (word_id, article_id, context, action, created_at) "
+                   "VALUES (1, 1, '', 'seen', 0)")
+    yield
+    with get_db() as db:
+        for t in ("word_encounters", "articles", "words", "placement_bands", "placement_runs"):
+            db.execute(f"DELETE FROM {t}")

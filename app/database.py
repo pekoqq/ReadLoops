@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS words (
     m_recall REAL DEFAULT 0,          -- 回忆层 log-odds
     m_level TEXT DEFAULT 'unknown',   -- unknown / seen / recognized / recalled
     m_updated INTEGER,
+    -- 词条来源，决定生词本的「删除」是真删还是只移出学习队列：
+    --   ecdict  来自 ECDICT 导入（有词典价值）
+    --   legacy  更早一次词典导入的遗留（无释义）
+    --   user    用户在界面里手动 / AI 补录的（只有这种才允许真删）
+    -- 「删除」不该把一本词典里的词抠掉 —— 用户想表达的是「别让我再学它了」。
+    source TEXT DEFAULT 'user',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -294,6 +300,7 @@ COLUMN_MIGRATIONS = {
         "m_recall": "REAL DEFAULT 0",
         "m_level": "TEXT DEFAULT 'unknown'",
         "m_updated": "INTEGER",
+        "source": "TEXT DEFAULT 'user'",
     },
     "placement_runs": {
         "source": "TEXT DEFAULT 'placement'",
@@ -321,6 +328,7 @@ POST_MIGRATION_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_words_frq ON words(frq);
 CREATE INDEX IF NOT EXISTS idx_words_mastered ON words(mastered);
 CREATE INDEX IF NOT EXISTS idx_words_m_level ON words(m_level);
+CREATE INDEX IF NOT EXISTS idx_words_source ON words(source);
 -- 表达式索引：选词/定级/覆盖率都用「有效词频 = frq 或 bnc」排序或分档，
 -- 建在 frq 上的普通索引对 COALESCE(NULLIF(frq,0), bnc) 完全用不上。
 CREATE INDEX IF NOT EXISTS idx_words_eff_rank ON words(COALESCE(NULLIF(frq, 0), bnc, 0));
