@@ -227,14 +227,25 @@ def get_book(book_id: int) -> Optional[dict]:
 
 
 def delete_book(book_id: int) -> bool:
-    """删除书架条目，同时删掉本地文件。"""
+    """删除书架条目，同时删掉下载到本地书库的文件。
+
+    ⚠️ 只删**书库目录内**的文件。local_path 一直由本模块生成（LIBRARY_DIR/pg{id}.ext），
+    但删除是不可逆的 —— 加一道目录包含校验，万一将来数据被写坏或有人手工改库，
+    也不会越界删掉用户自己的文件。
+    """
     book = get_book(book_id)
     if not book:
         return False
     p = book.get("local_path")
     if p:
         try:
-            Path(p).unlink(missing_ok=True)
+            target = Path(p).resolve()
+            library = LIBRARY_DIR.resolve()
+            if target == library or library in target.parents:
+                target.unlink(missing_ok=True)
+            else:
+                # 不在书库目录内：只解除引用，绝不删文件
+                print(f"拒绝删除书库目录外的文件：{target}")
         except OSError:
             pass
     with get_db() as db:

@@ -318,6 +318,23 @@ def get_material(material_id: int, with_content: bool = False) -> Optional[dict]
 
 
 def delete_material(material_id: int) -> bool:
+    """删除一份材料。**不会动用户的原始文件**，只删库里的记录。
+
+    同时清掉风格画像 `material_ids` 里对它的引用 —— 否则画像会指向不存在的材料，
+    界面上显示「由 X 份材料蒸馏」而实际能对上的少一份。
+    """
+    import json as _json
     with get_db() as db:
         cur = db.execute("DELETE FROM materials WHERE id=?", (material_id,))
-        return cur.rowcount > 0
+        if cur.rowcount == 0:
+            return False
+        for row in db.execute("SELECT id, material_ids FROM style_profiles").fetchall():
+            try:
+                ids = _json.loads(row["material_ids"] or "[]")
+            except (TypeError, ValueError):
+                continue
+            if material_id in ids:
+                left = [i for i in ids if i != material_id]
+                db.execute("UPDATE style_profiles SET material_ids=? WHERE id=?",
+                           (_json.dumps(left), row["id"]))
+        return True

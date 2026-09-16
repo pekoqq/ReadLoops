@@ -103,5 +103,10 @@ async def delete_article(article_id: int):
         # 先删除关联数据，再删除文章本身（避免外键约束失败）
         conn.execute("DELETE FROM highlights WHERE article_id = ?", (article_id,))
         conn.execute("DELETE FROM reading_sessions WHERE article_id = ?", (article_id,))
+        # ⚠️ 遇见记录也必须一起清。
+        # 重遇次数按 COUNT(DISTINCT article_id) 计算，而统计口径包含 action='lookup' ——
+        # 文章删了、记录还在，就成了「幽灵文章」：明明只剩 5 篇，界面却显示跨 6 篇。
+        # 实测就这么虚高过（journal 多算 1 篇）。
+        conn.execute("DELETE FROM word_encounters WHERE article_id = ?", (article_id,))
         conn.execute("DELETE FROM articles WHERE id = ?", (article_id,))
-    return {"status": "ok", "message": "文章已删除"}
+    return {"status": "ok", "message": "文章已删除（含它产生的遇见记录）"}

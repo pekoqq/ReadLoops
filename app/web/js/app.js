@@ -1060,7 +1060,7 @@ async function loadArticlesList() {
       const id = btn.getAttribute('data-id');
       console.log('删除文章 id:', id, typeof id);
       if (!id || id === 'undefined') { await showAlert('文章ID无效'); return; }
-      if (!await confirmDialog('确定删除这篇文章吗？', { danger: true })) return;
+      if (!await confirmDialog('确定删除这篇文章？\n它产生的遇见记录会一起删除，受影响的词重遇进度会相应回退。', { danger: true })) return;
       try {
         const url = window.location.origin + '/api/articles/' + id;
         console.log('删除URL:', url);

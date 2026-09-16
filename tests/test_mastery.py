@@ -233,3 +233,51 @@ def test_set_target_exam_rejects_unknown(env):
     assert selection.set_target_exam("not-an-exam") is False
     assert selection.set_target_exam("cet6") is True
     assert selection.target_exam() == "cet6"
+
+
+# ---------------------------------------------------------------- 删除语义
+
+def test_delete_article_cascades_encounters(env):
+    """⚠️ 回归：删文章必须连它产生的遇见记录一起删。
+
+    重遇次数按 COUNT(DISTINCT article_id) 算、口径含 action='lookup' ——
+    文章删了记录还在，就成了「幽灵文章」：明明只剩 5 篇，界面显示跨 6 篇。
+    """
+    import time as _t
+
+    from app.api.articles import delete_article
+    from app.services import encounter
+
+    _see(3, [1, 2, 3])
+    with get_db() as db:
+        db.execute("INSERT INTO articles (id,title,content,source,created_at) VALUES (2,'b','x','ai',0)")
+        db.execute("INSERT INTO articles (id,title,content,source,created_at) VALUES (3,'c','x','ai',0)")
+    mastery.refresh([3])
+    before = {s["text"]: s["articles"] for s in encounter.reentry_stats(only_active=False)}
+    assert before["rare"] == 3
+
+    import asyncio
+    asyncio.run(delete_article(2))
+
+    after = {s["text"]: s["articles"] for s in encounter.reentry_stats(only_active=False)}
+    assert after["rare"] == 2, f"删文章后重遇次数应回退到 2，实际 {after['rare']}"
+    with get_db() as db:
+        left = db.execute("SELECT COUNT(*) FROM word_encounters WHERE article_id=2").fetchone()[0]
+    assert left == 0, "不应留下指向已删文章的遇见记录"
+
+
+def test_delete_material_clears_profile_reference(env):
+    """删材料要清掉画像里的引用，否则画像指向不存在的材料。"""
+    import json as _json
+
+    from app.services.materials import delete_material
+
+    with get_db() as db:
+        db.execute("INSERT INTO materials (id,title,source_type,parse_status,created_at,updated_at) "
+                   "VALUES (7,'m','paste','parsed',0,0)")
+        db.execute("INSERT INTO style_profiles (id,name,material_ids,params,sample_count,is_active,created_at) "
+                   "VALUES (1,'p','[7, 8]','{}',0,0,0)")
+    assert delete_material(7) is True
+    with get_db() as db:
+        refs = _json.loads(db.execute("SELECT material_ids FROM style_profiles WHERE id=1").fetchone()[0])
+    assert refs == [8], f"应只剩 [8]，实际 {refs}"
