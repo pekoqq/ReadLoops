@@ -2964,24 +2964,35 @@ body.theme-transition *::after {
 .placement-hint { margin: 16px 0 12px; font-size: 12px; color: var(--text-secondary); }
 
 .placement-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 8px; margin-bottom: 20px;
 }
 .placement-word {
-  display: flex; align-items: center; gap: 9px;
-  padding: 11px 13px; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 12px; border-radius: var(--radius);
   border: 1px solid var(--glass-border);
   background: var(--glass);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  cursor: pointer; user-select: none;
-  font-size: 13px; color: var(--text-secondary);
   transition: border-color var(--page-out) var(--ease-out), background var(--page-out) var(--ease-out);
 }
-.placement-word:hover { border-color: var(--glass-border-strong); }
-.placement-word.known { border-color: var(--accent); color: var(--text); background: var(--glass-strong); }
-.placement-word input { display: none; }
-.placement-word span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.placement-word.yes { border-color: rgba(93, 202, 165, 0.55); background: rgba(93, 202, 165, 0.07); }
+.placement-word.no  { border-color: var(--glass-border); opacity: 0.55; }
+.pw-text {
+  flex: 1; min-width: 0; font-size: 13px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pw-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+.pw-btn {
+  font-family: inherit; font-size: 10px; line-height: 1;
+  padding: 5px 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--glass-border);
+  background: transparent; color: var(--text-tertiary);
+  transition: all var(--page-out) var(--ease-out);
+}
+.pw-btn:hover { color: var(--text-secondary); border-color: var(--glass-border-strong); }
+.pw-yes.on { color: #0f1a16; background: #5dcaa5; border-color: #5dcaa5; font-weight: 500; }
+.pw-no.on  { color: var(--text); background: var(--glass-strong); border-color: var(--glass-border-strong); }
 
 .placement-nav { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .placement-tip { font-size: 11px; color: var(--text-tertiary); }
