@@ -1,5 +1,43 @@
 # 约读阅读器 — 变更日志
 
+## [2.6.3] - 2026-09-16（修正两处短语释义错误；**未发布到 PyPI**）
+
+2.6.1 里标注了两处已知的释义错误，本轮修掉。修正本身也**必须有依据**，
+所以做成了工具里可复现的记录（`tools/enrich_phrases.py` 的 `MANUAL_FIXES`），
+而不是手改一次数据库 —— 工具重跑时会自动应用，且「改了哪条、依据是什么」可审计。
+
+### `work life` → `[机] 有效期间`（语义错误）
+
+ECDICT 给的是**机械义项**（使用年限）。核查真题语料里 `work life` 的 17 处出现：
+
+> **14 处是 `work-life balance` 的碎片**（"work-life balance" / "work-life problem"），
+> 它不是一个独立单位。
+
+所以正确处理不是「换个释义」而是**标记为非词汇单位**（`meaning_source='not_a_unit'`，
+释义置空），从而被选词算法排除。真正的单位 `work-life balance` 自己有条目。
+
+### `social media` → `社群媒体`（台湾用词）
+
+来源是「英文维基百科的跨语言链接」，给的是**中文维基条目名** —— 那是台湾用词。
+
+改用 **Wikidata 的 `zh-hans` 标签**：`Social media` → **社交媒体**（大陆用词、显式简体）。
+实测 Wikidata 对这批词的 `zh-hans` 覆盖良好且原生简体：
+`Climate change` → 气候变化、`Fast food` → 快餐、`Traffic congestion` → 交通堵塞。
+
+因此 `tools/enrich_phrases.py` 新增 **Wikidata 阶段**（优先级高于维基条目名），
+用于后续统一替换。⚠️ 该阶段本轮**被限流打断**（维基媒体按 IP 限流 429），
+待冷却后以 `--redo wikipedia` 重跑即可把 108 条维基条目来源统一升级。
+
+### 顺带核查
+
+- 全部 394 条释义**无繁体残留**（繁简转换生效）
+- ECDICT 来源里 87 条带领域标签，逐条抽查后只有 `work life` 一条确属语义错误
+  （`artificial intelligence`→[计]人工智能、`heart disease`→心脏病 等都是对的）
+
+回归：109 passed / 3 skipped，ruff 全绿。
+**PyPI 产物已构建并验证通过**（`twine check` PASSED、干净 venv 端到端可用），
+但本机无凭据，未发布。
+
 ## [2.6.2] - 2026-09-16（接上闭环最后一环 + 清除 phrases 双份事实源；**未发布到 PyPI**）
 
 审计发现两处结构问题，本轮修掉。

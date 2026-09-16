@@ -54,6 +54,34 @@ ECDICT_CSV = ROOT / "data" / "ecdict" / "ecdict.csv"
 TS_TABLE = ROOT / "data" / "opencc" / "TSCharacters.txt"
 WIKI_BATCH = 40          # 维基 API 单次最多 50 个标题，留点余量
 
+# ---------------------------------------------------------------- 人工复核的修正
+# 每条都注明依据。放在这里而不是手改数据库 —— 工具重跑时会自动应用，不会被覆盖，
+# 也让「哪些是我判断过的、依据是什么」可审计。
+#
+# 格式：短语 -> (正确释义 or None, 来源标记)
+MANUAL_FIXES: dict[str, tuple[str | None, str]] = {
+    # Wikidata 的 zh-hans 标签是「社交媒体」；而英文维基的跨语言链接给的是
+    # 中文维基条目名「社群媒体」，那是台湾用词。
+    "social media": ("社交媒体", "wikidata"),
+    # 真题语料里 work life 有 14/17 次是 work-life balance 的碎片，不是独立单位；
+    # ECDICT 给的是机械义项「[机] 有效期间」，与语料用法不符。
+    # 正确的单位是 work-life balance（它自己有词条），所以这里标为「非词汇单位」。
+    "work life": (None, "not_a_unit"),
+}
+
+
+def apply_manual_fixes(conn) -> int:
+    now = int(time.time())
+    n = 0
+    for text, (meaning, source) in MANUAL_FIXES.items():
+        cur = conn.execute(
+            "UPDATE words SET meaning=?, meaning_source=?, updated_at=? "
+            "WHERE type='phrase' AND text=?",
+            (meaning, source, now, text))
+        n += cur.rowcount
+    conn.commit()
+    return n
+
 
 # ---------------------------------------------------------------- 繁简
 
@@ -207,6 +235,56 @@ def phase_wikipedia(conn, rows: list[tuple[int, str]], delay: float) -> int:
     return n
 
 
+# ---------------------------------------------------------------- 来源 2b：Wikidata 标签
+
+def phase_wikidata(conn, rows: list[tuple[int, str]], delay: float) -> int:
+    """用 Wikidata 的 **zh-hans** 标签取中文 —— 显式简体、且是大陆用词。
+
+    为什么比「英文维基百科的跨语言链接」更好：
+      - langlinks 给的是中文维基的**条目名**，可能是台湾/香港用词
+        （实测 `social media` → 社群媒体，而大陆是**社交媒体**）
+      - 且条目名可能是繁体（`climate change` → 氣候變化）
+    Wikidata 的 label 直接带 `zh-hans` / `zh-hant` / `zh-cn` 变体，
+    实测 `Social media` → zh-hans=**社交媒体**、`Climate change` → **气候变化**。
+    """
+    now = int(time.time())
+    n = 0
+    for i in range(0, len(rows), WIKI_BATCH):
+        chunk = rows[i:i + WIKI_BATCH]
+        u = ("https://www.wikidata.org/w/api.php?action=wbgetentities&format=json"
+             "&sites=enwiki&props=labels|sitelinks&languages=zh-hans|zh-cn|zh"
+             "&titles=" + urllib.parse.quote("|".join(t for _, t in chunk)))
+        d = get_json(u)
+        if not d:
+            print(f"    [wikidata] 第 {i//WIKI_BATCH+1} 批失败，跳过")
+            time.sleep(delay * 3)
+            continue
+        got = {}
+        for eid, ent in (d.get("entities") or {}).items():
+            if eid == "-1" or not isinstance(ent, dict):
+                continue
+            labels = ent.get("labels") or {}
+            title = ((ent.get("sitelinks") or {}).get("enwiki") or {}).get("title")
+            if not title:
+                continue
+            # 优先 zh-hans，其次 zh-cn，最后 zh
+            for lang in ("zh-hans", "zh-cn", "zh"):
+                if lang in labels:
+                    got[title.lower()] = labels[lang]["value"]
+                    break
+        for wid, text in chunk:
+            zh = got.get(text.lower())
+            if zh and len(zh) <= 40:
+                conn.execute(
+                    "UPDATE words SET meaning=?, meaning_source='wikidata', updated_at=? WHERE id=?",
+                    (zh, now, wid))
+                n += 1
+        conn.commit()
+        print(f"    [wikidata] {min(i+WIKI_BATCH, len(rows))}/{len(rows)}，已补 {n}")
+        time.sleep(delay)
+    return n
+
+
 # ---------------------------------------------------------------- 来源 3：英文维基词典
 
 def _wikitext_defs(wikitext: str) -> list[str]:
@@ -305,7 +383,8 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=0, help="只处理前 N 条（试跑）")
     ap.add_argument("--delay", type=float, default=0.8, help="维基请求间隔秒数")
     ap.add_argument("--stats", action="store_true", help="只看进度")
-    ap.add_argument("--skip", default="", help="跳过的阶段，逗号分隔：ecdict,wikipedia,wiktionary")
+    ap.add_argument("--skip", default="", help="跳过的阶段，逗号分隔：ecdict,wikidata,wikipedia,wiktionary")
+    ap.add_argument("--redo", default="", help="清掉某个来源的释义后重取（如 --redo wikipedia）")
     args = ap.parse_args()
 
     from app.config import DB_PATH
@@ -317,6 +396,17 @@ def main() -> int:
         return 0
 
     skip = {s.strip() for s in args.skip.split(",") if s.strip()}
+
+    fixed = apply_manual_fixes(conn)
+    if fixed:
+        print(f"已应用 {fixed} 条人工复核修正")
+
+    if args.redo:
+        n = conn.execute(
+            "UPDATE words SET meaning=NULL, meaning_source=NULL "
+            "WHERE type='phrase' AND meaning_source=?", (args.redo,)).rowcount
+        conn.commit()
+        print(f"已清除 {n} 条来源为 {args.redo} 的释义，准备重取")
     # 只处理还没有释义的短语
     todo = [(r["id"], r["text"]) for r in conn.execute(
         """SELECT id, text FROM words
@@ -327,15 +417,23 @@ def main() -> int:
     print(f"待补释义的短语: {len(todo)} 条")
 
     if "ecdict" not in skip:
-        print("\n[1/3] ECDICT（离线，含变体匹配）…")
+        print("\n[1/4] ECDICT（离线，含变体匹配）…")
         n = phase_ecdict(conn, todo)
         print(f"      补上 {n} 条")
         done = {r[0] for r in conn.execute(
             "SELECT id FROM words WHERE type='phrase' AND meaning IS NOT NULL AND meaning != ''")}
         todo = [t for t in todo if t[0] not in done]
 
+    if "wikidata" not in skip and todo:
+        print(f"\n[2/4] Wikidata zh-hans 标签（还剩 {len(todo)} 条）…")
+        n = phase_wikidata(conn, todo, args.delay)
+        print(f"      补上 {n} 条")
+        done = {r[0] for r in conn.execute(
+            "SELECT id FROM words WHERE type='phrase' AND meaning IS NOT NULL AND meaning != ''")}
+        todo = [t for t in todo if t[0] not in done]
+
     if "wikipedia" not in skip and todo:
-        print(f"\n[2/3] 维基百科跨语言链接（还剩 {len(todo)} 条）…")
+        print(f"\n[3/4] 维基百科跨语言链接（还剩 {len(todo)} 条）…")
         n = phase_wikipedia(conn, todo, args.delay)
         print(f"      补上 {n} 条")
         done = {r[0] for r in conn.execute(
@@ -343,7 +441,7 @@ def main() -> int:
         todo = [t for t in todo if t[0] not in done]
 
     if "wiktionary" not in skip and todo:
-        print(f"\n[3/3] 英文维基词典（还剩 {len(todo)} 条，较慢）…")
+        print(f"\n[4/4] 英文维基词典（还剩 {len(todo)} 条）…")
         n = phase_wiktionary(conn, todo, args.delay)
         print(f"      补上 {n} 条")
 
