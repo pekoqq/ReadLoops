@@ -1,6 +1,6 @@
 # 约读阅读器 — 变更日志
 
-## [2.6.3] - 2026-09-16（修正两处短语释义错误；**未发布到 PyPI**）
+## [2.6.3] - 2026-09-16（修正两处短语释义错误；**已发布到 PyPI**）
 
 2.6.1 里标注了两处已知的释义错误，本轮修掉。修正本身也**必须有依据**，
 所以做成了工具里可复现的记录（`tools/enrich_phrases.py` 的 `MANUAL_FIXES`），
@@ -34,9 +34,15 @@ ECDICT 给的是**机械义项**（使用年限）。核查真题语料里 `work
 - ECDICT 来源里 87 条带领域标签，逐条抽查后只有 `work life` 一条确属语义错误
   （`artificial intelligence`→[计]人工智能、`heart disease`→心脏病 等都是对的）
 
-回归：109 passed / 3 skipped，ruff 全绿。
-**PyPI 产物已构建并验证通过**（`twine check` PASSED、干净 venv 端到端可用），
-但本机无凭据，未发布。
+### 发布
+
+回归：109 passed / 3 skipped，ruff 全绿。**已发布到 PyPI**：https://pypi.org/project/readloops/2.6.3/
+
+发布前验证：`twine check` 两个产物均 PASSED；干净 venv 端到端（`--help` / `init` / `doctor`）；
+全新库表结构 16 张、**无 `phrases`**；wheel 含 12 个前端资源；sdist 无数据/语料泄漏。
+发布后从 PyPI 全新安装再验一次，`pip install readloops==2.6.3` 可用。
+
+> 2.3.2 → 2.6.2 之间的版本都未单独发布，本次直接发 2.6.3 一并带过。
 
 ## [2.6.2] - 2026-09-16（接上闭环最后一环 + 清除 phrases 双份事实源；**未发布到 PyPI**）
 
