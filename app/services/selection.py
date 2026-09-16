@@ -26,6 +26,17 @@
 
 **明确排除 `recalled`**：已经能想起来的词不该再占生词额度。
 `recognized` 也不进候选 —— 它该去做提取练习（单词测试），而不是继续被输入。
+
+## 短语与单词同等对待
+
+罗肖尼视频里讲得很明确：常用 3000 词其实不止 3000 个词条，很多是**多词组合语**。
+所以短语走**完全相同**的分层逻辑，只是候选池换成 `type='phrase'`。
+
+注意差异：
+- 短语**一条释义都没有**（短语库只存了文本与真题频次）。这不影响选词 ——
+  方法本来就是「在语境中习得」，释义是复习时的锦上添花，不是前提。
+- 短语没有考试标签，所以第 3 层（目标考试新词）对它们不适用；
+  改用**真题语料频次**（`frequency` 列）排序：越常出现的短语越值得先学。
 """
 from __future__ import annotations
 
@@ -43,54 +54,78 @@ EXAM_LABELS = {
 # 分层查询。⚠️ 不要写成「一条 SQL 拉全表再在 Python 里分桶」——
 # 库里有 18 万词，那样每次生成文章都要先把十万多行拉进内存（实测 0.19s 且随词库增长）。
 # 按 m_level 分别查（该列有索引）并各自 LIMIT，只用取到够用的量。
-_BASE_WHERE = """
-    meaning IS NOT NULL AND meaning != ''
-    AND text GLOB '[a-z]*' AND text NOT LIKE '% %'
-    AND length(text) BETWEEN 3 AND 18
-    AND status NOT IN ('known')
-"""
-_RANK = "COALESCE(NULLIF(frq, 0), bnc, 0)"
+
+# 候选池过滤：单词与短语的唯一区别就是「含不含空格 / type 值」。
+# 短语**不要求有释义**（它们本来就只有文本与频次），单词仍然要求有释义。
+_KIND_WHERE = {
+    "word": ("type = 'word' AND meaning IS NOT NULL AND meaning != '' "
+             "AND text GLOB '[a-z]*' AND text NOT LIKE '% %' "
+             "AND length(text) BETWEEN 3 AND 18"),
+    "phrase": ("type = 'phrase' AND text LIKE '% %' "
+               "AND length(text) BETWEEN 5 AND 40"),
+}
+# 排序用的「有效频次」——**两者语义相反，必须归一化**：
+#   单词 frq/bnc 是 COCA 排名：**越小越高频**
+#   短语 frequency 是真题语料出现**次数**：**越大越高频**
+# 用同一个 ORDER BY rank ASC，短语就会优先选到最低频的垃圾（实测挑出 `s and s`）。
+# 所以短语取负号，让「越小越高频」成为统一口径。
+_KIND_RANK = {
+    "word": "COALESCE(NULLIF(frq, 0), bnc, 0)",
+    "phrase": "-frequency",
+}
+# 配合上面的负号，正值判据也要分开写
+_KIND_RANK_POSITIVE = {
+    "word": "COALESCE(NULLIF(frq, 0), bnc, 0) > 0",
+    "phrase": "frequency >= 4",      # 低于 4 次的多是高频词序列而非固定搭配
+}
+_BASE_WHERE = ""    # 兼容旧引用，实际用 _kind_where()
+_RANK = ""
 
 # 第 1 层：到期复习（按到期时间，最早的优先）
-_TIER1_SQL = f"""
-    SELECT id, text, {_RANK} AS rank, COALESCE(srs_due,0) AS due
-    FROM words
-    WHERE {_BASE_WHERE} AND m_level IN ('seen','recognized')
-      AND srs_due IS NOT NULL AND srs_due <= ?
-    ORDER BY srs_due ASC LIMIT ?
-"""
+def _tier_sql(kind: str) -> tuple[str, str, str]:
+    """按候选池类型生成三层查询。"""
+    where = _KIND_WHERE[kind]
+    rank = _KIND_RANK[kind]
+    rank_ok = _KIND_RANK_POSITIVE[kind]
+    tier1 = f"""
+        SELECT id, text, {rank} AS rank, COALESCE(srs_due,0) AS due
+        FROM words
+        WHERE {where} AND status NOT IN ('known')
+          AND m_level IN ('seen','recognized')
+          AND srs_due IS NOT NULL AND srs_due <= ?
+        ORDER BY srs_due ASC LIMIT ?
+    """
+    tier2 = f"""
+        SELECT w.id, w.text, {rank.replace('frequency', 'w.frequency').replace('frq', 'w.frq').replace('bnc', 'w.bnc')} AS rank,
+               COALESCE(ev.clean, 0) AS clean
+        FROM words w
+        JOIN (
+            SELECT we.word_id,
+                   COUNT(DISTINCT we.article_id) - COUNT(DISTINCT lu.article_id) AS clean
+            FROM word_encounters we
+            LEFT JOIN word_encounters lu
+                   ON lu.word_id = we.word_id AND lu.article_id = we.article_id
+                  AND lu.action = 'lookup'
+            WHERE we.action = 'seen' AND we.article_id IS NOT NULL
+            GROUP BY we.word_id
+        ) ev ON ev.word_id = w.id
+        WHERE {where.replace('type =', 'w.type =').replace('meaning IS', 'w.meaning IS')
+                      .replace('meaning !=', 'w.meaning !=').replace('text GLOB', 'w.text GLOB')
+                      .replace('text NOT LIKE', 'w.text NOT LIKE').replace('text LIKE', 'w.text LIKE')
+                      .replace('length(text)', 'length(w.text)')}
+          AND w.status NOT IN ('known')
+          AND w.m_level = 'seen' AND ev.clean > 0 AND ev.clean < 4
+        ORDER BY ev.clean DESC, rank ASC LIMIT ?
+    """
+    tier34 = f"""
+        SELECT id, text, {rank} AS rank
+        FROM words
+        WHERE {where} AND status NOT IN ('known')
+          AND m_level = 'unknown' AND {rank_ok}
+        ORDER BY rank ASC LIMIT ?
+    """
+    return tier1, tier2, tier34
 
-# 第 2 层：重遇缺口 —— 见过但识别还没建立。
-# 排序要按「干净遇见次数」降序（越接近 4 次越优先），这需要 join 遇见表。
-_TIER2_SQL = f"""
-    SELECT w.id, w.text, {_RANK.replace('frq', 'w.frq').replace('bnc', 'w.bnc')} AS rank,
-           COALESCE(ev.clean, 0) AS clean
-    FROM words w
-    JOIN (
-        SELECT we.word_id,
-               COUNT(DISTINCT we.article_id) - COUNT(DISTINCT lu.article_id) AS clean
-        FROM word_encounters we
-        LEFT JOIN word_encounters lu
-               ON lu.word_id = we.word_id AND lu.article_id = we.article_id
-              AND lu.action = 'lookup'
-        WHERE we.action = 'seen' AND we.article_id IS NOT NULL
-        GROUP BY we.word_id
-    ) ev ON ev.word_id = w.id
-    WHERE w.meaning IS NOT NULL AND w.meaning != ''
-      AND w.text GLOB '[a-z]*' AND w.text NOT LIKE '% %'
-      AND length(w.text) BETWEEN 3 AND 18
-      AND w.status NOT IN ('known')
-      AND w.m_level = 'seen' AND ev.clean > 0 AND ev.clean < 4
-    ORDER BY ev.clean DESC, rank ASC LIMIT ?
-"""
-
-# 第 3 / 4 层：全新词，按有效词频从高到低
-_TIER34_SQL = f"""
-    SELECT id, text, {_RANK} AS rank
-    FROM words
-    WHERE {_BASE_WHERE} AND m_level = 'unknown' AND rank > 0
-    ORDER BY rank ASC LIMIT ?
-"""
 
 def target_exam() -> str:
     """当前目标考试。"""
@@ -131,22 +166,29 @@ def _clean_exposure_map() -> dict[int, int]:
 
 
 def select_new_words(target_count: int = 10, exam: str | None = None,
-                     exclude: set[str] | None = None) -> list[str]:
-    """挑出这一篇要埋的目标生词。分层见模块 docstring。"""
+                     exclude: set[str] | None = None, kind: str = "word") -> list[str]:
+    """挑出这一篇要埋的目标词条。
+
+    kind='word' 挑单词，kind='phrase' 挑短语 —— 分层逻辑完全相同。
+    分层见模块 docstring。
+    """
     exam = exam or target_exam()
     exclude = {w.lower() for w in (exclude or set())}
     now = int(time.time())
     # 每层多取一些，抵消 exclude（最近 30 篇用过的词）造成的损耗
     ask = max(target_count * 3, 30)
+    q1, q2, q34 = _tier_sql(kind)
 
     with get_db() as db:
-        t1 = db.execute(_TIER1_SQL, (now, ask)).fetchall()
-        t2 = db.execute(_TIER2_SQL, (ask,)).fetchall()
-        t34 = db.execute(_TIER34_SQL, (ask * 4,)).fetchall()
-        # 目标考试词表（只在需要时查，且只查 level='unknown' 的词）
-        exam_ids = {r[0] for r in db.execute(
-            "SELECT id FROM words WHERE m_level = 'unknown' "
-            "AND ' ' || COALESCE(tags,'') || ' ' LIKE ?", (f"% {exam} %",))}
+        t1 = db.execute(q1, (now, ask)).fetchall()
+        t2 = db.execute(q2, (ask,)).fetchall()
+        t34 = db.execute(q34, (ask * 4,)).fetchall()
+        # 目标考试词表：短语没有考试标签，这一层对它们恒为空
+        exam_ids = set()
+        if kind == "word":
+            exam_ids = {r[0] for r in db.execute(
+                "SELECT id FROM words WHERE m_level = 'unknown' AND type = 'word' "
+                "AND ' ' || COALESCE(tags,'') || ' ' LIKE ?", (f"% {exam} %",))}
 
     tier1 = [(r["due"], r["text"]) for r in t1]
     tier2 = [(-(r["clean"]), r["rank"] or 10 ** 9, r["text"]) for r in t2]
@@ -166,6 +208,28 @@ def select_new_words(target_count: int = 10, exam: str | None = None,
             if len(picks) >= target_count:
                 return picks
     return picks
+
+
+# 一篇文章里短语的目标条数。少于单词 —— 短语更长、更难自然融入，
+# 而且方法里「重遇 12 次」对短语同样成立，一次埋太多反而都记不住。
+TARGET_PHRASES = 3
+
+
+def select_targets(word_count: int = 10, phrase_count: int = TARGET_PHRASES,
+                   exam: str | None = None,
+                   exclude: set[str] | None = None) -> dict:
+    """一次挑出这一篇要埋的**单词 + 短语**。
+
+    两者刻意分开挑：它们不共享候选池，也不该互相挤占额度 ——
+    视频里「短语和单词同等重要」的意思正是要各自都有位置，
+    而不是让短语去抢单词的名额。
+    """
+    exclude = {w.lower() for w in (exclude or set())}
+    words = select_new_words(word_count, exam=exam, exclude=exclude, kind="word")
+    phrases = select_new_words(phrase_count, exam=exam,
+                               exclude=exclude | {w.lower() for w in words},
+                               kind="phrase")
+    return {"words": words, "phrases": phrases}
 
 
 def explain_selection(limit: int = 10) -> dict:

@@ -1564,9 +1564,15 @@ function renderVocabGap(g, examSel, mastery) {
           前者该继续输入，后者才该去做提取练习。
         </div>
         <div class="gap-mastery-grid">
-          <div><b>${mastery.by_level.seen}</b><span>见过面</span></div>
-          <div><b>${mastery.by_level.recognized}</b><span>认得出来</span></div>
-          <div><b>${mastery.by_level.recalled}</b><span>想得起来</span></div>
+          <div><b>${mastery.by_level.seen}</b><span>词 · 见过面</span></div>
+          <div><b>${mastery.by_level.recognized}</b><span>词 · 认得出来</span></div>
+          <div><b>${mastery.by_level.recalled}</b><span>词 · 想得起来</span></div>
+          <div><b>${(mastery.phrases && mastery.phrases.seen) || 0}</b><span>短语 · 已接触</span></div>
+        </div>
+        <div class="gap-mastery-note" style="margin-top:10px">
+          <b>短语和单词同等重要。</b>方法里「常用 3000 词其实不止 3000 个词条」——
+          多词组合语（固定搭配）各算一条，所以短语走的是**和单词完全相同**的
+          选词、重遇与掌握度机制，只是从各自的池子里挑，互不挤占名额。
         </div>
       </div>` : ''}
     </div>
@@ -3141,11 +3147,22 @@ async function drawGraph() {
       ctx.arc(x, y, glowR, 0, Math.PI * 2);
       ctx.fill();
 
-      // 实心核：深色主题下小一点让光晕当主体；浅色主题下大一点保证是清晰的点
-      ctx.fillStyle = withAlpha(color, Math.min(1, alpha * 1.05));
-      ctx.beginPath();
-      ctx.arc(x, y, r * (lightTheme ? 0.82 : 0.62), 0, Math.PI * 2);
-      ctx.fill();
+      // 词 = 实心点；短语 = **空心环**。
+      // 形状区分而不是颜色区分 —— 单色体系下才能既分得开又不花。
+      // 环也贴合语义：短语是「由多个部分组成的单位」。
+      const core = r * (lightTheme ? 0.82 : 0.62);
+      if (n.type === 'phrase') {
+        ctx.strokeStyle = withAlpha(color, Math.min(1, alpha * 1.15));
+        ctx.lineWidth = Math.max(1, core * 0.34);
+        ctx.beginPath();
+        ctx.arc(x, y, core * 0.86, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = withAlpha(color, Math.min(1, alpha * 1.05));
+        ctx.beginPath();
+        ctx.arc(x, y, core, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       if (n === st.hover) {
         ctx.lineWidth = 1.2;
@@ -3197,9 +3214,12 @@ async function drawGraph() {
         .sort((a, b) => (b.deg + b.weight) - (a.deg + a.weight));
       if (hubs.length) drawLabel(hubs[0], 0.42, '10px ' + SANS, 10);
     } else {
-      // 悬停：焦点优先，再按连接度排邻居 —— 信息量刚好，不糊
+      // 悬停：焦点优先，再按连接度排邻居 —— 信息量刚好，不糊。
+      // ⚠️ 必须设上限：悬停「材料」这类高连接度的枢纽时，它的邻居就是全部短语，
+      // 不封顶会一次画出 50+ 个标签，又回到「乱」。
       const ranked = [...near].filter(n => n._x !== undefined)
-        .sort((a, b) => (b.deg + b.weight) - (a.deg + a.weight));
+        .sort((a, b) => (b.deg + b.weight) - (a.deg + a.weight))
+        .slice(0, 18);
       for (const n of ranked) {
         const hi = n === st.hover;
         drawLabel(n, hi ? 0.95 : 0.6, (hi ? '12px ' : '11px ') + SANS, hi ? 12 : 11);

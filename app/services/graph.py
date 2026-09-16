@@ -138,8 +138,9 @@ def rebuild(include_words: bool = True, include_phrases: bool = True,
                 """SELECT id, lemma, text, meaning, level, frequency, status,
                           lookup_count, encounter_count, m_level
                    FROM words
-                   WHERE status IN ('learning','review','target') OR lookup_count > 0
-                      OR encounter_count > 0
+                   WHERE type = 'word'
+                     AND (status IN ('learning','review','target') OR lookup_count > 0
+                          OR encounter_count > 0)
                    ORDER BY (lookup_count + encounter_count) DESC, frequency DESC
                    LIMIT ?""",
                 (max_nodes * 4,),
@@ -171,22 +172,53 @@ def rebuild(include_words: bool = True, include_phrases: bool = True,
                              "m_level": r["m_level"] or "unknown"},
                 }
 
-        # ---- 2. 候选短语：清掉 quot 实体残留等垃圾
+        # ---- 2. 候选短语
+        # 短语已并入 words 表（type='phrase'），所以这里读的是**学习状态**：
+        #   - 用户接触过的短语（status 非 new / 有遇见 / 有掌握度）→ 一律入图，
+        #     它们是用户自己的学习对象，和单词同等重要
+        #   - 其余的按真题频次补足，作为语境
         phrase_meta: dict[str, dict] = {}
         if include_phrases:
+            seen_ids: set[int] = set()
             for r in db.execute(
-                "SELECT id, text, meaning, level, frequency FROM phrases "
-                "ORDER BY frequency DESC LIMIT ?",
+                """SELECT id, text, meaning, level, frequency, m_level, status
+                   FROM words
+                   WHERE type = 'phrase'
+                     AND (status IN ('learning','review','target')
+                          OR lookup_count > 0 OR encounter_count > 0
+                          OR m_level != 'unknown')
+                   ORDER BY frequency DESC LIMIT ?""",
                 (max_nodes,),
             ).fetchall():
                 text = _clean_phrase(r["text"])
                 if not text or text in phrase_meta:
                     continue
+                seen_ids.add(r["id"])
                 phrase_meta[text] = {
                     "ref_id": r["id"],
                     "weight": round(1.5 + min(2.0, (r["frequency"] or 0) / 40), 2),
                     "meta": {"level": r["level"], "meaning": (r["meaning"] or "")[:120],
-                             "frequency": r["frequency"] or 0},
+                             "frequency": r["frequency"] or 0,
+                             "m_level": r["m_level"] or "unknown",
+                             "status": r["status"]},
+                }
+            # 补足语境用的高频短语
+            for r in db.execute(
+                """SELECT id, text, meaning, level, frequency, m_level, status
+                   FROM words WHERE type = 'phrase' AND frequency >= 8
+                   ORDER BY frequency DESC LIMIT ?""",
+                (max_nodes,),
+            ).fetchall():
+                text = _clean_phrase(r["text"])
+                if not text or text in phrase_meta or r["id"] in seen_ids:
+                    continue
+                phrase_meta[text] = {
+                    "ref_id": r["id"],
+                    "weight": round(1.5 + min(2.0, (r["frequency"] or 0) / 40), 2),
+                    "meta": {"level": r["level"], "meaning": (r["meaning"] or "")[:120],
+                             "frequency": r["frequency"] or 0,
+                             "m_level": r["m_level"] or "unknown",
+                             "status": r["status"]},
                 }
 
         node_ids: dict[tuple[str, str], int] = {}

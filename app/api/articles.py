@@ -33,6 +33,8 @@ async def generate():
         "word_count": article.word_count,
         "new_word_count": article.new_word_count,
         "target_words": targets,
+        # 短语单列出来，前端可以分开展示「本篇补的单词 / 短语」
+        "target_phrases": [t for t in targets if " " in t],
         "created_at": article.created_at,
     }
 

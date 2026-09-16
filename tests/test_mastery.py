@@ -281,3 +281,82 @@ def test_delete_material_clears_profile_reference(env):
     with get_db() as db:
         refs = _json.loads(db.execute("SELECT material_ids FROM style_profiles WHERE id=1").fetchone()[0])
     assert refs == [8], f"应只剩 [8]，实际 {refs}"
+
+
+# ---------------------------------------------------------------- 短语与单词同等对待
+
+def test_phrases_are_selected_from_their_own_pool(env):
+    """短语必须走和单词相同的分层逻辑，且**不共享候选池**。
+
+    视频里「短语和单词同等重要」的意思是各自都有位置，
+    而不是让短语去抢单词的名额。
+    """
+    with get_db() as db:
+        db.executemany(
+            """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
+                                  frq, created_at, updated_at)
+               VALUES (?,?,?,'phrase','',? ,?,'new',0,0,0)""",
+            [(10, "high school", "high school", "CET4", 30),
+             (11, "long term", "long term", "CET4", 25),
+             (12, "years ago", "years ago", "CET4", 20),
+             (13, "s and s", "s and s", "CET4", 3)],   # 低于频次下限，应被挡掉
+        )
+        db.execute("UPDATE words SET type='word' WHERE text='rare'")
+    mastery.refresh()
+    picked = selection.select_new_words(5, exam="cet4", kind="phrase")
+    assert picked, "应当能选出短语"
+    assert all(" " in w for w in picked), f"短语池里不该出现单词：{picked}"
+    assert "s and s" not in picked, "频次低于下限的噪声短语应被过滤"
+
+
+def test_phrase_ranking_is_by_frequency_descending(env):
+    """⚠️ 回归：短语的 frequency 是**次数**，单词的 frq 是**排名**，二者语义相反。
+
+    曾经用同一个 `ORDER BY rank ASC`，导致短语优先选到**最低频**的垃圾
+    （实测挑出 `s and s`、`one example` 这种高频词序列而非固定搭配）。
+    """
+    with get_db() as db:
+        db.executemany(
+            """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
+                                  frq, created_at, updated_at)
+               VALUES (?,?,?,'phrase','',? ,?,'new',0,0,0)""",
+            [(20, "high school", "high school", "CET4", 33),
+             (21, "medium term", "medium term", "CET4", 15),
+             (22, "low term", "low term", "CET4", 5)],
+        )
+    mastery.refresh()
+    picked = selection.select_new_words(3, exam="cet4", kind="phrase")
+    assert picked[0] == "high school", f"应当先选最高频的短语，实际 {picked}"
+
+
+def test_phrases_and_words_do_not_share_quota(env):
+    """一次挑选应当同时给出单词与短语，互不挤占。"""
+    with get_db() as db:
+        db.executemany(
+            """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
+                                  frq, created_at, updated_at)
+               VALUES (?,?,?,?,'释义','CET4',?, 'new',?,0,0)""",
+            [(30, "alpha", "alpha", "word", 0, 500),
+             (31, "beta", "beta", "word", 0, 600),
+             (32, "high school", "high school", "phrase", 30, 0)],
+        )
+    mastery.refresh()
+    r = selection.select_targets(word_count=5, phrase_count=2, exam="cet4")
+    assert r["words"] and all(" " not in w for w in r["words"])
+    assert r["phrases"] and all(" " in p for p in r["phrases"])
+
+
+def test_phrase_encounter_is_tracked_like_words(env):
+    """短语并入 words 表后，重遇与掌握度机制自动复用，无需另起一套。"""
+    from app.services import encounter
+
+    with get_db() as db:
+        db.execute(
+            """INSERT INTO words (id, lemma, text, type, meaning, level, frequency, status,
+                                  frq, created_at, updated_at)
+               VALUES (40,'long term','long term','phrase','','CET4',30,'new',0,0,0)""")
+    encounter.record_article(1, "", ["long term"])
+    mastery.refresh([40])
+    e = mastery.explain(40)
+    assert e["evidence"]["干净遇见（见过但没查）"] == 1
+    assert e["level"] == "seen"

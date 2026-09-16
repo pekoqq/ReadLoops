@@ -120,10 +120,9 @@ def _select_new_words(target_count):
     return selection.select_new_words(target_count=target_count, exclude=recent_used)
 
 
-def _generate_once(topic, opening, ending, new_words):
+def _generate_once(topic, opening, ending, new_words, target_phrases=None):
     """单次生成文章，不做去重检测。"""
     import json as _json
-    import random as _random
 
     # 查询目标词的词形变化
     word_families = {}
@@ -142,15 +141,10 @@ def _generate_once(topic, opening, ending, new_words):
                 except Exception:
                     pass
 
-    # 从短语库选2-3个目标短语（高频优先，随机选）
-    target_phrases = []
-    with get_db() as conn:
-        phrases = conn.execute(
-            "SELECT text FROM phrases WHERE frequency >= 3 ORDER BY frequency DESC LIMIT 50"
-        ).fetchall()
-        if phrases:
-            phrase_texts = [p['text'] for p in phrases]
-            target_phrases = _random.sample(phrase_texts, min(3, len(phrase_texts)))
+    # 目标短语由调用方（selection.select_targets）挑好传进来。
+    # 旧实现是「从高频前 50 条里随机抽 3 条」——既不看掌握度、也不看重遇进度，
+    # 而且**每篇都从同一个池子里抽**，等于把短语当成装饰而不是学习对象。
+    target_phrases = list(target_phrases or [])
 
     # 构建词族描述
     family_desc = ""
@@ -383,9 +377,15 @@ def generate_article(target_new_words=10):
     """
     import random
 
+    # 单词与短语**分别**挑，各自成池（视频里「短语和单词同等重要」的意思正是
+    # 要各自都有位置，而不是让短语去抢单词的名额）。
+    from app.services import selection as _sel
     from app.services.similarity import check_duplicate
-
-    new_words = _select_new_words(target_new_words)
+    picked = _sel.select_targets(word_count=target_new_words,
+                                 exam=_sel.target_exam(),
+                                 exclude=_get_recent_used_words(30))
+    new_words = picked["words"]
+    target_phrases = picked["phrases"]
 
     # 题材列表
     all_topics = [
@@ -437,7 +437,7 @@ def generate_article(target_new_words=10):
         opening = random.choice(openings)
         ending = random.choice(endings)
 
-        result = _generate_once(topic, opening, ending, new_words)
+        result = _generate_once(topic, opening, ending, new_words, target_phrases)
         if not result:
             continue
 
@@ -483,9 +483,11 @@ def generate_article(target_new_words=10):
         word_count=word_count,
         # ⚠️ 必须带上 target_words：Article 的默认值是 "[]"，
         # 漏掉它会让调用方（API 响应、重遇记录）都拿到空列表 ——
-        # 于是「文章里埋了哪些目标生词」这条信息在生成之后就丢了，
+        # 于是「文章里埋了哪些目标词条」这条信息在生成之后就丢了，
         # 重遇机制只能统计到正文里偶然出现的旧词。
-        target_words=json.dumps(article_words, ensure_ascii=False),
+        # 短语一并放入：它们在 words 表里是 type='phrase' 的行，
+        # 重遇跟踪与掌握度模型会自动复用，不需要另起一套。
+        target_words=json.dumps(article_words + target_phrases, ensure_ascii=False),
         new_word_count=len(article_words),
         created_at=now,
     )

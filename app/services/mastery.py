@@ -307,13 +307,23 @@ def explain(word_id: int) -> Optional[dict]:
 
 
 def stats() -> dict:
-    """掌握度分布。"""
+    """掌握度分布。单词与短语分开统计 —— 它们同等重要，所以各自都要能看到进度。"""
     with get_db() as db:
         rows = db.execute(
-            "SELECT m_level, COUNT(*) c FROM words WHERE m_level != 'unknown' GROUP BY m_level"
+            """SELECT COALESCE(type,'word') AS t, m_level, COUNT(*) c
+               FROM words WHERE m_level != 'unknown' GROUP BY t, m_level"""
         ).fetchall()
-    by = {r["m_level"]: r["c"] for r in rows}
+        tracked = db.execute(
+            """SELECT COALESCE(type,'word') AS t, COUNT(*) c FROM words
+               WHERE type='phrase' AND (status IN ('learning','target')
+                    OR lookup_count>0 OR encounter_count>0) GROUP BY t"""
+        ).fetchall()
+    out = {"word": {lv: 0 for lv in LEVELS}, "phrase": {lv: 0 for lv in LEVELS}}
+    for r in rows:
+        out.setdefault(r["t"], {lv: 0 for lv in LEVELS})[r["m_level"]] = r["c"]
     return {
-        "by_level": {lv: by.get(lv, 0) for lv in LEVELS},
+        "by_level": out["word"],
+        "phrases": out.get("phrase", {}),
+        "phrase_tracked": sum(r["c"] for r in tracked),
         "targets": {"recalled": TH_RECALLED, "recognized": TH_RECOGNIZED},
     }
