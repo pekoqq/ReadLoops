@@ -3108,3 +3108,139 @@ body.theme-transition *::after {
 /* 图谱信息浮层：固定在左下角，不跟随鼠标（跟随会压在节点标签上） */
 .tip-sub { margin-top: 3px; font-size: 10px; opacity: 0.6; }
 .tip-body { margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.6; }
+
+/* ==========================================================================
+   移动端适配
+   --------------------------------------------------------------------------
+   通过 Tailscale 在手机浏览器里直接访问 Mac 上的服务，所以这里要照顾两件事：
+     1. **交互逻辑**：桌面端的 hover / 鼠标事件在触屏上不存在
+     2. **显示比例**：手机竖屏宽度只有 390px 左右，桌面布局会挤成一团
+   核心改动是侧边栏 —— 桌面端它是「推挤」正文（margin-left 负值），
+   手机上必须改成**覆盖式抽屉 + 遮罩**，否则正文只剩一半宽度。
+   ========================================================================== */
+
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 90;          /* 介于 .main(z:auto) 与 .sidebar(z:100) 之间 */
+  opacity: 0;
+  transition: opacity 0.3s var(--ease-out);
+}
+.sidebar-backdrop.show { display: block; opacity: 1; }
+
+@media (max-width: 900px) {
+  :root {
+    /* 触屏最小可点区域按 44px 来，32px 的桌面按钮在手机上很难点中 */
+    --btn-h: 40px;
+    --btn-h-sm: 34px;
+  }
+
+  /* ---- 侧边栏：覆盖式抽屉 ---- */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: min(280px, 84vw);
+    z-index: 100;
+    margin-left: 0 !important;      /* 覆盖桌面端的推挤逻辑 */
+    transform: translateX(-100%);
+    opacity: 1;
+    background: var(--bg, #1a1818);
+    border-right: 1px solid var(--glass-border);
+    box-shadow: 12px 0 40px rgba(0, 0, 0, 0.45);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .sidebar.collapsed { margin-left: 0 !important; transform: translateX(-100%); opacity: 1; }
+  .sidebar:not(.collapsed),
+  .sidebar.sidebar-visible { transform: translateX(0); opacity: 1; }
+  /* 移动端不用 auto-sidebar-mode 那套（它是给桌面自动收起用的） */
+  .app.auto-sidebar-mode .sidebar { transform: translateX(-100%); margin-left: 0 !important; opacity: 1; }
+  .app.auto-sidebar-mode .sidebar.sidebar-visible { transform: translateX(0); }
+
+  /* ---- 主区：占满整宽 ---- */
+  .main { width: 100%; }
+
+  /* ---- 工具栏：允许换行、收紧间距 ---- */
+  .toolbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 6px;
+    row-gap: 6px;
+  }
+  .toolbar-spacer { display: none; }
+  .toolbar-btn,
+  .toolbar-btn.large { font-size: 12px; padding: 0 12px; height: var(--btn-h); min-height: 40px; }
+  /* 「生成文章」是主操作，独占一行更醒目 */
+  #generateBtn { order: -1; }
+  #generateStatus { width: 100%; }
+  /* 次要按钮在窄屏上别都挤出来 */
+  #lookupHistoryBtn, #focusBtn { display: none; }
+
+  /* ---- 正文：占满宽度、字号加大 ---- */
+  .reader-container { padding: 16px 0 96px; }
+  .reader,
+  .reader.wide-view {
+    max-width: 100%;
+    padding: 20px clamp(16px, 5vw, 28px) 32px;
+    font-size: 17px;
+    line-height: 1.75;
+  }
+
+  /* ---- 统计/列表：栅格降列 ---- */
+  .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .test-type-grid { grid-template-columns: 1fr !important; }
+  .placement-grid { grid-template-columns: repeat(2, 1fr); }
+  .gap-mastery-grid { flex-wrap: wrap; }
+  .gap-mastery-grid > div { flex: 1 1 calc(50% - 6px); max-width: none; }
+  .gap-head { flex-direction: column; align-items: stretch; }
+  .gap-head .toolbar-btn { align-self: flex-start; }
+
+  /* ---- 知识图谱：手机上给足高度 ---- */
+  .graph-stage { height: 62vh; min-height: 320px; }
+  .graph-stage canvas { touch-action: none; }   /* 交给 JS 处理拖拽/缩放 */
+
+  /* ---- 查词面板：底部全宽弹出，而不是右侧窄条 ---- */
+  .lookup-panel {
+    left: 0; right: 0; bottom: 0; top: auto;
+    width: 100%; max-width: 100%;
+    max-height: 62vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    transform: translateY(100%);
+  }
+  .lookup-panel.show { transform: translateY(0); }
+  .right-panel { width: min(320px, 88vw); }
+
+  /* ---- 弹窗：接近全屏 ---- */
+  .modal-content { width: min(560px, 92vw); max-height: 86vh; overflow-y: auto; }
+  .article-detail-popup { max-width: 100%; }
+
+  /* ---- 计时栏 ---- */
+  .timer-bar { padding: 8px 12px; font-size: 12px; }
+  .timer-bar #articleMeta { display: none; }
+
+  /* ---- 触屏没有 hover：去掉依赖 hover 的悬浮反馈 ---- */
+  @media (hover: none) {
+    .toolbar-btn:hover { transform: none; box-shadow: none; }
+    .placement-word:hover { border-color: var(--glass-border); }
+  }
+}
+
+/* 更窄（手机竖屏）再收一档 */
+@media (max-width: 480px) {
+  .reader, .reader.wide-view { font-size: 16px; padding: 16px 14px 28px; }
+  .stats-grid { grid-template-columns: 1fr 1fr !important; gap: 8px; }
+  .stat-card .num { font-size: 20px; }
+  .placement-grid { grid-template-columns: 1fr; }
+  .kb-toolbar { gap: 8px; }
+}
+
+/* 横屏/矮屏：图谱别把整屏吃掉 */
+@media (max-height: 520px) {
+  .graph-stage { height: 78vh; }
+}

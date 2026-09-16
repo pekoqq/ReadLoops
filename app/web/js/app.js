@@ -136,6 +136,52 @@ $('#toggleSidebar').addEventListener('click', () => {
   const sidebar = $('#sidebar');
   sidebar.classList.remove('sidebar-visible');
   sidebar.classList.toggle('collapsed');
+  syncSidebarBackdrop();
+});
+
+// ---------------------------------------------------------------- 移动端
+// 通过 Tailscale 在手机浏览器里访问，所以要照顾触屏交互与窄屏比例。
+const isMobileView = () => window.matchMedia('(max-width: 900px)').matches;
+
+function syncSidebarBackdrop() {
+  const bd = $('#sidebarBackdrop');
+  const sb = $('#sidebar');
+  if (!bd || !sb) return;
+  // 只在手机上、且侧边栏打开时显示遮罩
+  bd.classList.toggle('show', isMobileView() && !sb.classList.contains('collapsed'));
+}
+
+// 手机默认收起侧边栏，把整宽让给正文
+if (isMobileView()) {
+  $('#sidebar').classList.add('collapsed');
+}
+
+// 点遮罩关闭抽屉
+$('#sidebarBackdrop').addEventListener('click', () => {
+  $('#sidebar').classList.add('collapsed');
+  $('#sidebar').classList.remove('sidebar-visible');
+  syncSidebarBackdrop();
+});
+
+// 手机上点了导航项后自动收起，免得挡住刚打开的页面
+$$('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    if (!isMobileView()) return;
+    $('#sidebar').classList.add('collapsed');
+    syncSidebarBackdrop();
+  });
+});
+
+// 旋屏 / 改窗口大小时同步：回到桌面宽度要把遮罩收掉，回到手机宽度要默认收起
+let _lastMobile = isMobileView();
+window.addEventListener('resize', () => {
+  const now = isMobileView();
+  if (now !== _lastMobile) {
+    _lastMobile = now;
+    if (now) $('#sidebar').classList.add('collapsed');
+    else $('#sidebar').classList.remove('collapsed');
+  }
+  syncSidebarBackdrop();
 });
 
 // 自动侧边栏模式：和文章互动时收起侧边栏
@@ -3273,6 +3319,29 @@ async function drawGraph() {
     if (!graphRAF) graphRAF = requestAnimationFrame(loop);
   }
 
+  // 图谱信息浮层：固定在舞台左下角，不跟随指针。
+  // 跟随指针的浮层会直接压在节点标签上（实测重叠），而且触屏上也没有「指针位置」可言。
+  function showGraphTip(hit) {
+    const tip = $('#graphTip');
+    if (!tip) return;
+    tip.style.display = 'block';
+    tip.style.left = '18px';
+    tip.style.top = 'auto';
+    tip.style.bottom = '18px';
+    const m = hit.meta || {};
+    const ML = { recalled: '想得起来', recognized: '认得出来', seen: '见过面', unknown: '未接触' };
+    tip.innerHTML = `<b>${escapeHtml(hit.label)}</b>` +
+      `<div class="tip-sub">${TYPE_LABEL[hit.type] || hit.type}` +
+      (m.m_level ? ` · ${ML[m.m_level] || m.m_level}` : '') +
+      (m.level ? ` · ${escapeHtml(m.level)}` : '') + '</div>' +
+      (m.meaning ? `<div class="tip-body">${escapeHtml(String(m.meaning).slice(0, 90))}</div>` : '');
+  }
+
+  function hideGraphTip() {
+    const tip = $('#graphTip');
+    if (tip) tip.style.display = 'none';
+  }
+
   // 命中测试：把屏幕坐标换回物理域再比距离
   function pick(sx, sy) {
     const st = graphState;
@@ -3303,25 +3372,7 @@ async function drawGraph() {
     const hit = pick(x, y);
     if (hit !== st.hover) { st.hover = hit; kick(false); }
     canvas.style.cursor = hit ? 'pointer' : 'default';
-    const tip = $('#graphTip');
-    if (!tip) return;
-    if (hit) {
-      // 固定在舞台左下角，不跟随鼠标。
-      // 画布上悬停时已经会显示名字，跟随鼠标的浮层会直接压在标签上（实测重叠）。
-      tip.style.display = 'block';
-      tip.style.left = '18px';
-      tip.style.top = 'auto';
-      tip.style.bottom = '18px';
-      const m = hit.meta || {};
-      const ML = { recalled: '想得起来', recognized: '认得出来', seen: '见过面', unknown: '未接触' };
-      tip.innerHTML = `<b>${escapeHtml(hit.label)}</b>` +
-        `<div class="tip-sub">${TYPE_LABEL[hit.type] || hit.type}` +
-        (m.m_level ? ` · ${ML[m.m_level] || m.m_level}` : '') +
-        (m.level ? ` · ${escapeHtml(m.level)}` : '') + '</div>' +
-        (m.meaning ? `<div class="tip-body">${escapeHtml(String(m.meaning).slice(0, 90))}</div>` : '');
-    } else {
-      tip.style.display = 'none';
-    }
+    if (hit) showGraphTip(hit); else hideGraphTip();
   };
 
   canvas.onmousedown = (e) => {
@@ -3342,9 +3393,55 @@ async function drawGraph() {
     if (!st) return;
     st.hover = null;
     kick(false);
-    const tip = $('#graphTip');
-    if (tip) tip.style.display = 'none';
+    hideGraphTip();
   };
+
+  // ---- 触屏支持 ----
+  // 原来只绑了 mouse* 事件，手机上完全拖不动节点（只能等浏览器补发延迟 300ms 的
+  // 合成鼠标事件，体验很差）。这里显式处理 touch：
+  //   单指拖动 = 拖动节点（命中节点时）
+  //   单指点击 = 选中/看信息
+  // 双指缩放暂未实现（力导向图本身会自动铺满，缩放的需求不强）。
+  const touchPos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    const t = e.touches[0] || e.changedTouches[0];
+    return [t.clientX - r.left, t.clientY - r.top];
+  };
+
+  canvas.addEventListener('touchstart', (e) => {
+    const st = graphState;
+    if (!st || e.touches.length !== 1) return;
+    e.preventDefault();                       // 阻止页面滚动/双击缩放
+    const [x, y] = touchPos(e);
+    const hit = pick(x, y);
+    if (hit) {
+      st.drag = hit; st.selected = hit; st.hover = hit;
+      kick(true);
+      showGraphTip(hit);
+    } else {
+      st.hover = null;
+      hideGraphTip();
+      kick(false);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    const st = graphState;
+    if (!st || e.touches.length !== 1) return;
+    e.preventDefault();
+    const [x, y] = touchPos(e);
+    if (st.drag) {
+      st.drag.x = st.toLX(x); st.drag.y = st.toLY(y);
+      kick(true);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', (e) => {
+    const st = graphState;
+    if (!st) return;
+    e.preventDefault();
+    if (st.drag) { st.drag = null; kick(true); }
+  }, { passive: false });
 
   graphRAF = requestAnimationFrame(loop);
 }

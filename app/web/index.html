@@ -64,6 +64,11 @@
       </div>
     </aside>
 
+    <!-- 移动端侧边栏遮罩：抽屉打开时点它关闭。
+         ⚠️ 必须放在 .app 内部：.app 有 transform 会创建层叠上下文，
+         放在外面的话遮罩会盖住 sidebar（z-index 在各自上下文里比较）。 -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
+
     <main class="main">
       <header class="toolbar">
         <button class="toolbar-btn icon" id="toggleSidebar" title="折叠边栏">[≡]</button>

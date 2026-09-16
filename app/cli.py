@@ -126,18 +126,57 @@ def cmd_import_dict(args):
     return 0
 
 
+def _local_addresses(port: int) -> list[str]:
+    """列出本机可用于访问服务的地址（局域网 / Tailscale）。
+
+    手机要能打开就必须让服务监听非 127.0.0.1 的地址，并知道该用哪个 IP 访问。
+    Tailscale 的地址落在 100.64.0.0/10（CGNAT 段），优先列出来 ——
+    用它在手机上访问比局域网 IP 更稳（换 Wi-Fi 也不会变）。
+    """
+    import socket
+
+    found: list[tuple[int, str]] = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if ip.startswith("127."):
+                continue
+            # Tailscale：100.64.0.0/10
+            parts = ip.split(".")
+            is_ts = parts[0] == "100" and 64 <= int(parts[1]) <= 127
+            found.append((0 if is_ts else 1, f"http://{ip}:{port}"))
+    except OSError:
+        pass
+    seen, out = set(), []
+    for _, u in sorted(found):
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def cmd_serve(args):
     """启动服务。"""
     import uvicorn
 
+    host = "0.0.0.0" if getattr(args, "lan", False) else args.host
     url = f"http://{args.host}:{args.port}"
 
-    if not args.no_browser:
+    if not args.no_browser and not getattr(args, "lan", False):
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
 
     print(f"ReadLoops 运行于 {url}")
+    if host == "0.0.0.0":
+        addrs = _local_addresses(args.port)
+        print("\n已开启局域网 / Tailscale 访问，手机浏览器可直接打开：")
+        if addrs:
+            for a in addrs:
+                print(f"    {a}")
+        else:
+            print("    （未检测到非回环地址，请确认 Tailscale 或局域网已连接）")
+        print("\n⚠️  服务对本网段可见 —— 只在你信任的网络（如自己的 Tailscale 网络）里这样启动。")
     print("按 Ctrl+C 停止")
-    uvicorn.run("app.main:app", host=args.host, port=args.port, log_level="info")
+    uvicorn.run("app.main:app", host=host, port=args.port, log_level="info")
     return 0
 
 
@@ -163,6 +202,8 @@ def main(argv=None):
 
     p_serve = sub.add_parser("serve", help="启动服务（默认命令）")
     p_serve.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
+    p_serve.add_argument("--lan", action="store_true",
+                         help="监听 0.0.0.0，供手机/其他设备通过局域网或 Tailscale 访问")
     p_serve.add_argument("--port", type=int, default=8000, help="端口（默认 8000）")
     p_serve.add_argument("--no-browser", action="store_true", help="不自动打开浏览器")
     p_serve.set_defaults(func=cmd_serve)
