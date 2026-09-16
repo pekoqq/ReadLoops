@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import sqlite3
 import sys
@@ -172,6 +173,66 @@ def import_all(conn: sqlite3.Connection, path: Path) -> dict:
     return {"matched": len(matched)}
 
 
+def add_missing(conn: sqlite3.Connection, path: Path, max_frq: int = 30000) -> dict:
+    """把 ECDICT 里**词典缺失**的高词频词补进来。
+
+    为什么必须做：实测 ECDICT 中 COCA 前 20,000 的词里有 **2,119 个（11.9%）**
+    不在库内 —— 包括 `i`、`n't`、`others`、`including`、`recent`、`internet`、
+    `percent` 这种高频词。而覆盖率计算会把「无法还原的 token」算作不认识，
+    于是覆盖率被系统性低估（四级语料有 11% 的 token 落在这里）。
+
+    只补两头的交集：**高词频 + 有中文释义**。生僻且无释义的词补进来毫无用处
+    （库里已有 7 万个这样的条目）。
+    """
+    from app.services.dict_import import level_from_tag, parse_exchange
+
+    have = {r[0] for r in conn.execute("SELECT lower(text) FROM words")}
+    now = int(time.time())
+    rows = []
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        for row in csv.DictReader(f):
+            word = (row.get("word") or "").strip()
+            if not word:
+                continue
+            low = word.lower()
+            if low in have:
+                continue
+            frq = _int(row.get("frq"))
+            bnc = _int(row.get("bnc"))
+            # ⚠️ 必须 frq 或 bnc 一起看：ECDICT 里有一批常见词的 COCA 排名是 0
+            # 但 BNC 有排名（例如 percent：frq=0 / bnc=2802）。只看 frq 会把它们
+            # 当成生僻词漏掉，而覆盖率会把「查不到」当作「不认识」。
+            rank = frq or bnc
+            if not (0 < rank <= max_frq):
+                continue
+            meaning = (row.get("translation") or "").strip()
+            if not meaning:
+                continue
+            tag = (row.get("tag") or "").strip().lower()
+            tags = " ".join(p for p in tag.split() if p in TAG_KEYS)
+            ex = parse_exchange(row.get("exchange") or "")
+            rows.append((
+                low, word, "word", meaning, (row.get("phonetic") or "").strip(),
+                "CET4" if "cet4" in tags else level_from_tag(tag) or "common",
+                tags, frq, bnc, _int(row.get("collins"), None),
+                1 if (row.get("oxford") or "").strip() else 0,
+                json.dumps(ex, ensure_ascii=False) if ex else None,
+                now, now,
+            ))
+
+    if rows:
+        conn.executemany(
+            """INSERT INTO words (lemma, text, type, meaning, phonetic, level,
+                                  tags, frq, bnc, collins, oxford, exchange,
+                                  created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            rows,
+        )
+        conn.commit()
+    print(f"  补入 {len(rows):,} 个缺失的高频词（COCA ≤ {max_frq:,}，且带释义）")
+    return {"added": len(rows)}
+
+
 def report(conn: sqlite3.Connection) -> None:
     print("\n=== 导入结果 ===")
     total = conn.execute("SELECT COUNT(*) FROM words").fetchone()[0]
@@ -198,6 +259,10 @@ def report(conn: sqlite3.Connection) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stats", action="store_true", help="只打印统计，不导入")
+    ap.add_argument("--add-missing", action="store_true",
+                    help="补入 ECDICT 中库内缺失的高词频词（默认只更新已有行）")
+    ap.add_argument("--max-frq", type=int, default=30000,
+                    help="补词时的 COCA 词频上限（默认 30000）")
     ap.add_argument("--db", default=None, help="数据库路径（默认取 app.config）")
     args = ap.parse_args()
 
@@ -212,6 +277,10 @@ def main() -> int:
             print(f"找不到 ECDICT: {path}")
             return 1
         import_all(conn, path)
+        if args.add_missing:
+            add_missing(conn, path, max_frq=args.max_frq)
+            # 补词后要重新更新一遍标签（新词还没打上）
+            import_all(conn, path)
 
     report(conn)
     return 0

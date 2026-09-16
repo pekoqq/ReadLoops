@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.database import get_db
-from app.services import encounter
+from app.services import encounter, vocab_gap
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
@@ -268,3 +268,17 @@ def reentry(limit: int = 200, only_active: bool = True):
         "items": encounter.reentry_stats(limit=max(1, min(limit, 1000)),
                                          only_active=only_active),
     }
+
+
+@router.get("/stats/vocab-gap")
+def vocab_gap_overview():
+    """词汇差距：词汇量、真题覆盖率、各考试缺口、进度预测。
+
+    覆盖率不是「认识多少词表里的词」，而是**按词频档位给语料加权** ——
+    实测 CET4 大纲词表只覆盖四级真题语料 15.8% 的 token（词表装的是内容词，
+    剩下 84% 是基础词与功能词），拿词表百分比当「能读懂多少」会严重失真。
+    """
+    # 没有定级结果时铺一条默认假设，否则新用户的整页数字都是空的
+    from app.services import placement as pl
+    pl.ensure_default_run()
+    return vocab_gap.overview()

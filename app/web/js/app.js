@@ -1462,12 +1462,99 @@ function updateVocabToolbar() {
   }
 }
 
+/** 词汇差距区块：覆盖率仪表 + 各考试缺口 + 进度预测。
+ *
+ * 覆盖率不是「词表掌握百分比」—— 实测 CET4 大纲词表只覆盖四级真题语料
+ * 15.8% 的 token，剩下 84% 是基础词与功能词，拿词表百分比当「能读懂多少」会严重失真。
+ * 这里显示的是按词频档位加权的**真实覆盖率**，也就是 i+1 判据本身。
+ */
+function renderVocabGap(g) {
+  const cov = g.coverage && g.coverage.CET4 && g.coverage.CET4.available ? g.coverage.CET4 : null;
+  const c6 = g.coverage && g.coverage.CET6 && g.coverage.CET6.available ? g.coverage.CET6 : null;
+  const pct = (v) => (v * 100).toFixed(1);
+
+  const gauge = cov ? (() => {
+    const c = cov.coverage * 100;
+    const low = cov.i1_low * 100, high = cov.i1_high * 100;
+    const verdict = cov.in_i1
+      ? `在 i+1 区间内 —— 每 300 词约 ${cov.unknown_per_300.toFixed(0)} 个生词，正是高效吸收的密度`
+      : (c < low
+        ? `尚未进入可理解输入区间（${low}%），每 300 词约 <b>${cov.unknown_per_300.toFixed(0)}</b> 个生词，读起来会偏吃力`
+        : `已超过 i+1 上沿（${high}%），材料偏简单，可以上难度了`);
+    return `
+    <div class="gap-cover">
+      <div class="gap-cover-head">
+        <span>四级真题覆盖率</span>
+        <span class="gap-cover-val">${pct(cov.coverage)}%</span>
+      </div>
+      <div class="gap-gauge">
+        <div class="gap-gauge-i1" style="left:${low}%;width:${high - low}%"></div>
+        <div class="gap-gauge-fill" style="width:${c}%"></div>
+        <div class="gap-gauge-mark" style="left:${c}%"></div>
+      </div>
+      <div class="gap-gauge-scale">
+        <span>0%</span>
+        <span class="gap-i1-label">i+1 可理解输入区间 ${low}–${high}%</span>
+        <span>100%</span>
+      </div>
+      <div class="gap-verdict ${cov.in_i1 ? 'ok' : ''}">${verdict}</div>
+      ${c6 ? `<div class="gap-minor">六级真题覆盖率 ${pct(c6.coverage)}%（每 300 词约 ${c6.unknown_per_300.toFixed(0)} 个生词）</div>` : ''}
+      <div class="gap-source">基于 ${cov.passages} 篇四级真题 / ${cov.tokens.toLocaleString()} 词实测</div>
+    </div>`;
+  })() : '<div class="gap-verdict">真题语料不可用（运行 tools/crawl_exam_corpus.py 抓取）</div>';
+
+  const exams = (g.exams || []).map(e => {
+    const filled = Math.round(e.progress * 22);
+    return `
+      <div class="meter-row" title="已掌握 ${e.known} / ${e.size}">
+        <span class="meter-label gap-exam-name">${e.name}</span>
+        <span class="meter-track"><span class="meter-fill" style="width:${Math.round(e.progress * 100)}%"></span></span>
+        <span class="meter-val">${e.known}/${e.size}</span>
+        <span class="gap-exam-rest">还差 ${e.gap}</span>
+      </div>`;
+  }).join('');
+
+  const rate = g.rate || {};
+  const etaLine = (() => {
+    if (!rate.enough_data) {
+      return '学够一段时间（累计新掌握 10 词以上）后才好估算进度 —— 现在给数字只会是编的。';
+    }
+    return `近 ${rate.days} 天日均新掌握 <b>${rate.per_day}</b> 词。`;
+  })();
+
+  return `
+    <div class="stats-section gap-section">
+      <h2 class="stats-section-title">词汇差距</h2>
+
+      <div class="gap-head">
+        <div>
+          <div class="gap-vocab">${g.vocab_estimate.toLocaleString()}${g.is_lower_bound ? '+' : ''} <small>词</small></div>
+          <div class="gap-sub">${g.using_default
+            ? '默认假设：掌握最高频 2,500 词。<b>这不是测出来的</b> —— 做一次定级测试才有真实数字。'
+            : `来自你的词汇量定级测试（伪词虚报率 ${(g.false_alarm * 100).toFixed(1)}%）`}</div>
+        </div>
+        <button class="toolbar-btn ${g.using_default ? 'primary' : ''}"
+                onclick="switchPage(loadPlacement)">${g.using_default ? '去做定级测试' : '重新测试'}</button>
+      </div>
+
+      ${gauge}
+
+      <div class="gap-exams">
+        <div class="meter-title">各考试缺口</div>
+        <div class="gap-exam-list">${exams}</div>
+        <div class="gap-eta">${etaLine}</div>
+      </div>
+    </div>
+  `;
+}
+
 async function loadStats() {
-  const [s, activity, reentry, placement] = await Promise.all([
+  const [s, activity, reentry, placement, gap] = await Promise.all([
     api.get('/api/stats/overview'),
     api.get('/api/stats/activity?weeks=26'),
     api.get('/api/stats/reentry?limit=12').catch(() => ({ summary: null, items: [] })),
     api.get('/api/placement/summary').catch(() => ({ has_result: false })),
+    api.get('/api/stats/vocab-gap').catch(() => null),
   ]);
   const mins = Math.floor(s.total_reading_seconds / 60);
   const hours = Math.floor(mins / 60);
@@ -1482,6 +1569,9 @@ async function loadStats() {
 
   $('#reader').innerHTML = `
     <h1>学习统计</h1>
+
+    <!-- 词汇差距（本轮新增：把「提升词汇量」变成可计算的闭环）-->
+    ${gap ? renderVocabGap(gap) : ''}
 
     <!-- 概览卡片 -->
     <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
@@ -1501,9 +1591,9 @@ async function loadStats() {
         <div class="num">${s.streak_days}</div>
         <div class="label">连续学习天数</div>
       </div>
-      <div class="stat-card"${placement.has_result ? ' style="cursor:pointer" onclick="switchPage(loadPlacement)"' : ''}>
+      <div class="stat-card" style="cursor:pointer" onclick="switchPage(loadPlacement)">
         <div class="num">${(placement.has_result ? placement.vocab_estimate : s.vocab_estimate).toLocaleString()}${placement.has_result && placement.is_lower_bound ? '+' : ''}</div>
-        <div class="label">${placement.has_result ? '词汇量（定级）' : '估算词汇量（未定级）'}</div>
+        <div class="label">${gap && !gap.using_default ? '词汇量（已定级）' : '词汇量（默认假设）'}</div>
       </div>
       <div class="stat-card">
         <div class="num">${s.test_accuracy}%</div>

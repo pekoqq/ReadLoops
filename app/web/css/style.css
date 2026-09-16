@@ -3014,3 +3014,63 @@ body.theme-transition *::after {
 /* 重遇列表在宽布局下会被拉得很长，收窄到易读宽度 */
 .reentry-note, .reentry-head, .reentry-list { max-width: 620px; }
 .reentry-list .meter-row { margin-bottom: 5px; }
+
+/* ---- 词汇差距 ---- */
+.gap-section { max-width: 760px; }
+.gap-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 18px; margin-bottom: 22px;
+}
+.gap-vocab { font-size: 34px; line-height: 1.15; color: var(--text); }
+.gap-vocab small { font-size: 14px; color: var(--text-secondary); }
+.gap-sub { margin-top: 6px; font-size: 11px; color: var(--text-tertiary); line-height: 1.7; max-width: 460px; }
+
+.gap-cover {
+  padding: 18px 20px; margin-bottom: 24px;
+  border: 1px solid var(--glass-border-strong); border-radius: var(--radius-lg);
+  background: var(--glass); backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inner-shadow);
+}
+.gap-cover-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12px; color: var(--text-secondary); margin-bottom: 14px;
+}
+.gap-cover-val { font-size: 20px; color: var(--text); }
+
+.gap-gauge {
+  position: relative; height: 14px; border-radius: 4px; overflow: hidden;
+  background: var(--glass-strong); border: 1px solid var(--glass-border);
+}
+/* i+1 区间高亮：这是判据本身，必须一眼看到「够没够到」 */
+.gap-gauge-i1 {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(93, 202, 165, 0.28);
+  border-left: 1px dashed rgba(93, 202, 165, 0.7);
+  border-right: 1px dashed rgba(93, 202, 165, 0.7);
+}
+.gap-gauge-fill {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  background: var(--accent); opacity: 0.55;
+  animation: enterFade var(--enter-dur) var(--ease-damped) both;
+}
+.gap-gauge-mark {
+  position: absolute; top: -3px; bottom: -3px; width: 2px;
+  background: var(--text); box-shadow: 0 0 6px rgba(0,0,0,0.4);
+}
+.gap-gauge-scale {
+  display: flex; justify-content: space-between; margin-top: 8px;
+  font-size: 10px; color: var(--text-tertiary);
+}
+.gap-i1-label { color: rgba(93, 202, 165, 0.95); }
+.gap-verdict { margin-top: 14px; font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+.gap-verdict.ok { color: rgba(93, 202, 165, 0.95); }
+.gap-verdict b { color: var(--text); }
+.gap-minor { margin-top: 8px; font-size: 11px; color: var(--text-tertiary); }
+.gap-source { margin-top: 10px; font-size: 10px; color: var(--text-tertiary); opacity: 0.7; }
+
+.gap-exam-list { max-width: 620px; }
+.gap-exam-name { flex: 0 0 42px; text-align: left; font-size: 11px; color: var(--text-secondary); }
+.gap-exam-rest { flex: 0 0 74px; font-size: 10px; color: var(--text-tertiary); }
+.gap-eta { margin-top: 14px; font-size: 11px; color: var(--text-tertiary); line-height: 1.8; }
+.gap-eta b { color: var(--text); }

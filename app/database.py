@@ -231,6 +231,7 @@ CREATE TABLE IF NOT EXISTS placement_runs (
     is_lower_bound INTEGER DEFAULT 0,   -- 最高档也掌握得很好 → 估计值只是下界
     false_alarm REAL DEFAULT 0,         -- 伪词虚报率（自评高估的校正项）
     answered INTEGER DEFAULT 0,
+    source TEXT DEFAULT 'placement',    -- placement=真实测试 / default=默认假设（若未测）
     created_at INTEGER NOT NULL
 );
 
@@ -282,6 +283,9 @@ COLUMN_MIGRATIONS = {
         "collins": "INTEGER",
         "oxford": "INTEGER DEFAULT 0",
         "mastered": "INTEGER DEFAULT 0",
+    },
+    "placement_runs": {
+        "source": "TEXT DEFAULT 'placement'",
     },
     "tests": {
         "status": "TEXT DEFAULT 'in_progress'",

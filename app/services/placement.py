@@ -53,11 +53,12 @@ PSEUDO_WORDS: list[str] = [
 # 抽题只取「有释义、有词频、纯小写单词」的词 —— 库里还有 7 万个
 # 无释义的生僻词（bloubiskop 之类），它们不能当题目。
 _ITEM_SQL = """
-    SELECT id, text, frq FROM words
-    WHERE frq BETWEEN ? AND ? AND meaning IS NOT NULL AND meaning != ''
+    SELECT id, text, COALESCE(NULLIF(frq, 0), bnc, 0) AS rank FROM words
+    WHERE COALESCE(NULLIF(frq, 0), bnc, 0) BETWEEN ? AND ?
+      AND meaning IS NOT NULL AND meaning != ''
       AND text GLOB '[a-z]*' AND text NOT LIKE '% %'
       AND length(text) BETWEEN 3 AND 16
-    ORDER BY frq
+    ORDER BY rank
 """
 
 
@@ -143,11 +144,12 @@ def score(answers: list[dict]) -> dict:
                 pseudo_known += int(known)
                 continue
             row = db.execute(
-                "SELECT frq FROM words WHERE lower(text) = ? LIMIT 1", (text,)
+                """SELECT COALESCE(NULLIF(frq, 0), bnc, 0) AS rank
+                   FROM words WHERE lower(text) = ? LIMIT 1""", (text,)
             ).fetchone()
-            if not row or not row["frq"]:
+            if not row or not row["rank"]:
                 continue
-            frq = row["frq"]
+            frq = row["rank"]
             for lo, hi in BANDS:
                 if lo <= frq <= hi:
                     per_band[(lo, hi)]["sampled"] += 1
@@ -241,7 +243,7 @@ def latest_bands() -> list[dict]:
     """最近一次定级测试的分档掌握率（供覆盖率与缺口计算使用）。"""
     with get_db() as db:
         row = db.execute(
-            "SELECT id, vocab_estimate, is_lower_bound, false_alarm, created_at "
+            "SELECT id, vocab_estimate, is_lower_bound, false_alarm, source, created_at "
             "FROM placement_runs ORDER BY created_at DESC, id DESC LIMIT 1"
         ).fetchone()
         if not row:
@@ -262,6 +264,51 @@ def rate_for_frq(frq: int, bands: Optional[list[dict]] = None) -> Optional[float
         if b["band_lo"] <= frq <= b["band_hi"]:
             return b["rate"]
     return None
+
+
+DEFAULT_VOCAB = 2500
+
+
+def ensure_default_run(vocab: int = DEFAULT_VOCAB) -> int:
+    """没有定级结果时，铺一条「默认假设」的分档掌握率。
+
+    为什么需要：覆盖率、考试缺口、i+1 选词都要一个起点。没有它，
+    新用户的统计页只能显示「2000 + 学过的几个词」这种假数字。
+    这里按「掌握 COCA 最高频的前 N 词」铺一条单调的阶梯，
+    并标记 source='default' —— 前端要如实告诉用户这是假设不是测量。
+
+    真实定级测试完成后，这条会被覆盖（latest_bands 取最新一条）。
+    """
+    with get_db() as db:
+        row = db.execute(
+            "SELECT id FROM placement_runs ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+        if row:
+            return row["id"]
+
+        now = int(time.time())
+        cur = db.execute(
+            """INSERT INTO placement_runs
+                   (vocab_estimate, is_lower_bound, false_alarm, answered, source, created_at)
+               VALUES (?,0,0,0,'default',?)""",
+            (vocab, now),
+        )
+        run_id = cur.lastrowid
+
+        rows = []
+        remaining = float(vocab)
+        for lo, hi in BANDS:
+            size = hi - lo + 1
+            rate = max(0.0, min(1.0, remaining / size))
+            remaining -= rate * size
+            rows.append((run_id, lo, hi, size, 0, 0, round(rate, 4)))
+        db.executemany(
+            """INSERT INTO placement_bands
+                   (run_id, band_lo, band_hi, band_size, sampled, known, rate)
+               VALUES (?,?,?,?,?,?,?)""",
+            rows,
+        )
+    return run_id
 
 
 def summary() -> dict:
