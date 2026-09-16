@@ -2869,25 +2869,32 @@ body.theme-transition *::after {
   align-items: center;
   gap: 14px;
 }
+/* 图谱舞台：**不要框**。
+   有边框 + 玻璃拟态的盒子，会让它看起来像一个「组件」；Obsidian 那种图谱是
+   直接浮在页面上的，靠中心一点微光和四周的自然收暗形成纵深。 */
 .graph-stage {
   position: relative;
   width: 100%;
   height: calc(100vh - 300px);
   min-height: 380px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--glass-border);
-  background: var(--glass);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-inner-shadow);
+  border: none;
+  background:
+    radial-gradient(ellipse 62% 58% at 50% 46%,
+      color-mix(in srgb, var(--text) 6%, transparent) 0%,
+      color-mix(in srgb, var(--text) 1.5%, transparent) 46%,
+      transparent 100%);
   overflow: hidden;
   animation: enterFade var(--enter-dur) var(--ease-damped) both;
+}
+/* 不支持 color-mix 的浏览器退化为无色（只是少了那层微光，不影响可读） */
+@supports not (background: color-mix(in srgb, red 5%, transparent)) {
+  .graph-stage { background: transparent; }
 }
 .graph-stage canvas { display: block; }
 .graph-tip {
   display: none;
   position: absolute;
-  max-width: 240px;
+  max-width: 280px;
   padding: 8px 11px;
   border-radius: var(--radius);
   border: 1px solid var(--glass-border-strong);
@@ -2899,7 +2906,8 @@ body.theme-transition *::after {
   line-height: 1.6;
   pointer-events: none;
   z-index: 5;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  box-shadow: 0 4px 18px rgba(0,0,0,0.18);
+  font-family: ui-sans-serif, -apple-system, "PingFang SC", sans-serif;
 }
 @media (prefers-reduced-motion: reduce) {
   .kb-card, .graph-stage { animation-duration: 0.01s; }
@@ -3096,3 +3104,7 @@ body.theme-transition *::after {
 }
 .gap-mastery-grid b { font-size: 22px; color: var(--text); font-weight: 400; }
 .gap-mastery-grid span { font-size: 11px; color: var(--text-tertiary); }
+
+/* 图谱信息浮层：固定在左下角，不跟随鼠标（跟随会压在节点标签上） */
+.tip-sub { margin-top: 3px; font-size: 10px; opacity: 0.6; }
+.tip-body { margin-top: 6px; font-size: 11px; opacity: 0.85; line-height: 1.6; }

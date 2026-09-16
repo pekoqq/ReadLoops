@@ -2753,7 +2753,9 @@ const PHYS = {
 
 // 四类节点的基准半径。要拉开层次，否则 78 个短语和 14 个词一样大，
 // 视觉上就是一坨没有重心的点云。
-const NODE_BASE_R = { word: 4.0, phrase: 5.2, article: 9.0, material: 11.0 };
+// 尺寸分层要拉开：**用户的词**是主角，短语是语境（内置短语库来的，不是你自己的积累），
+// 枢纽最显眼。之前短语比词还大，图上主体成了内置短语库，「不像我的图谱」。
+const NODE_BASE_R = { word: 5.0, phrase: 2.6, article: 8.0, material: 10.0 };
 
 async function loadGraph() {
   $('#reader').innerHTML = `
@@ -2882,19 +2884,68 @@ async function drawGraph() {
     const v = getComputedStyle(document.documentElement).getPropertyValue(name);
     return (v || '').trim() || fallback;
   };
+  // 单色为主，而不是四个饱和色相。
+  // 之前用 白/紫/青/橙 四色区分类别，四色平铺在深灰底上是最典型的「AI 生成仪表盘」
+  // 观感；Obsidian 那类精致感来自克制 —— 一个前景色 + 明度层级。
+  // 现在：类别的区分交给形状与大小，**信息用明度表达**（掌握度），
+  // 只有 article/material 这类「枢纽」保留一点点色相。
+  const text = cssVar('--text', '#fdfcfc');
+  const accent = cssVar('--accent', '#8c82ff');
   const palette = {
-    // 词跟随主题前景色；其余三类用固定色相以便区分。
-    // 注意不能用 --accent：深色主题下它就是 --text，短语会和词同色。
-    word: cssVar('--text', '#fdfcfc'),
-    phrase: '#8c82ff',
-    article: '#5dcaa5',
-    material: '#ef9f27',
+    // 掌握度 → 明度：越亮表示掌握得越牢
+    recalled: 0.92,
+    recognized: 0.66,
+    seen: 0.38,
+    unknown: 0.22,
+    // 枢纽节点（文章/材料）用一个去饱和的强调色，幅度很小
+    hub: accent,
+    hubAlpha: 0.72,
   };
   const ink = {
-    label: cssVar('--text-secondary', 'rgba(253,252,252,0.6)'),
-    labelHi: cssVar('--text', '#fdfcfc'),
-    edge: cssVar('--accent', '#8c82ff'),  // 连线跟随主题前景色，深浅主题都可读
+    label: text,
+    edge: text,
   };
+  // 光晕这个隐喻在深浅主题下是**反的**：深色底上「发光」= 亮核 + 扩散光；
+  // 浅色底上同样的径向扩散看起来是「墨渍/糊掉」（实测暗色节点晕成一团）。
+  // 所以浅色主题要收紧光晕、加大实心核，让节点是清晰的点而不是一团雾。
+  const lightTheme = luminance(text) < 0.5;
+
+  /** 粗略亮度（0=黑 1=白），用于判断当前是深色还是浅色主题。 */
+  function luminance(color) {
+    const c = (color || '').trim();
+    let r = 200, g = 200, b = 200;
+    if (c.startsWith('#')) {
+      let hex = c.slice(1);
+      if (hex.length === 3) hex = hex.split('').map(x => x + x).join('');
+      const n = parseInt(hex, 16);
+      if (!isNaN(n) && hex.length >= 6) {
+        r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255;
+      }
+    } else {
+      const m = c.match(/rgba?\(([^)]+)\)/);
+      if (m) { const p = m[1].split(',').map(x => parseFloat(x)); r = p[0]; g = p[1]; b = p[2]; }
+    }
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  }
+
+  /** 给任意 CSS 颜色加 alpha（主题变量可能是 #rgb / #rrggbb / rgb()）。 */
+  function withAlpha(color, a) {
+    const c = (color || '').trim();
+    if (c.startsWith('#')) {
+      let hex = c.slice(1);
+      if (hex.length === 3) hex = hex.split('').map(x => x + x).join('');
+      const n = parseInt(hex, 16);
+      if (!isNaN(n) && hex.length >= 6) {
+        return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+      }
+    }
+    const m = c.match(/rgba?\(([^)]+)\)/);
+    if (m) {
+      const p = m[1].split(',').map(x => x.trim());
+      return `rgba(${p[0]},${p[1]},${p[2]},${a})`;
+    }
+    return `rgba(200,200,200,${a})`;
+  }
 
   graphState = {
     nodes, links, byId, ctx, canvas, W, H, S, kx, ky,
@@ -2919,7 +2970,40 @@ async function drawGraph() {
     if (st.alpha < PHYS.alphaMin) {
       st.alpha = 0;
       st.physics = false;
+      fitToView();     // 停下来的那一刻把构图铺满画布
     }
+  }
+
+  /** 收敛后把整张图缩放到填满可用区域。
+   *
+   * 力导向稳定后的半径由斥力/弹簧的平衡决定，和画布大小无关 —— 结果常常是
+   * 缩在中间一小团、四周大片空白（实测只占约一半宽度）。与其反复调物理参数
+   * 去凑，不如收敛后做一次等比缩放：这是**参数无关**的构图保证。
+   * 只在收敛时做一次，不干扰拖拽（拖拽改的是布局坐标）。
+   */
+  function fitToView() {
+    const st = graphState;
+    if (!st || st.nodes.length < 2) return;
+    const pad = PHYS.padding + 8;
+    const xs = st.nodes.map(n => n.x);
+    const ys = st.nodes.map(n => n.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+    const avail = Math.max(40, st.S - pad * 2);
+    // 上限 3.2 倍：节点很少时不至于把四五个点撑成一屏
+    const scale = Math.min(avail / w, avail / h, 3.2);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const tx = pad + st.S / 2, ty = pad + st.S / 2;
+    for (const n of st.nodes) {
+      n.x = tx + (n.x - cx) * scale;
+      n.y = ty + (n.y - cy) * scale;
+      if (n.homeX !== undefined) {
+        n.homeX = tx + (n.homeX - cx) * scale;
+        n.homeY = ty + (n.homeY - cy) * scale;
+      }
+    }
+    render();
   }
 
   function step(dt) {
@@ -2989,64 +3073,137 @@ async function drawGraph() {
   function render() {
     const st = graphState;
     if (!st) return;
-    const { ctx, W, H, nodes, links, palette } = st;
+    const { ctx, W, H, nodes, links } = st;
     ctx.clearRect(0, 0, W, H);
 
-    // 连线：用主题强调色 + globalAlpha，避免写死 rgba 在浅色主题下失效
-    ctx.lineWidth = 0.7;
-    ctx.strokeStyle = st.ink.edge;
+    // 悬停时先把「邻居集合」算出来，用于整体降噪：
+    // 非邻居压暗、邻居提亮 —— 这是 Obsidian 那种「聚焦」观感的来源。
+    const near = new Set();
+    if (st.hover) {
+      near.add(st.hover);
+      for (const l of links) {
+        if (l.s === st.hover) near.add(l.t);
+        else if (l.t === st.hover) near.add(l.s);
+      }
+    }
+    const focusing = !!st.hover;
+
+    // ---- 连线：曲线 + 极淡 ----
+    // 直线边在 174 条时会织成一张网（「乱」的主因之一）；轻微弧线能显著降低这种
+    // 机械感，也更容易看出哪条连着哪个节点。
+    ctx.lineCap = 'round';
     for (const l of links) {
-      const near = st.hover && (l.s === st.hover || l.t === st.hover);
-      ctx.globalAlpha = near ? 0.7 : 0.14;
+      const x1 = st.toSX(l.s.x), y1 = st.toSY(l.s.y);
+      const x2 = st.toSX(l.t.x), y2 = st.toSY(l.t.y);
+      const isNear = focusing && (near.has(l.s) && near.has(l.t));
+      const dx = x2 - x1, dy = y2 - y1;
+      // 垂直于连线方向外拱一点，拱度随距离缩放
+      const bow = 0.09;
+      const mx = (x1 + x2) / 2 + dy * bow;
+      const my = (y1 + y2) / 2 - dx * bow;
+
+      if (isNear) { ctx.globalAlpha = 0.42; ctx.lineWidth = 1.1; }
+      else if (focusing) { ctx.globalAlpha = 0.045; ctx.lineWidth = 0.6; }
+      else { ctx.globalAlpha = 0.085; ctx.lineWidth = 0.6; }
+      ctx.strokeStyle = ink.edge;
       ctx.beginPath();
-      ctx.moveTo(st.toSX(l.s.x), st.toSY(l.s.y));
-      ctx.lineTo(st.toSX(l.t.x), st.toSY(l.t.y));
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(mx, my, x2, y2);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
 
+    // ---- 节点：柔光 + 实心核 ----
     for (const n of nodes) {
+      const x = st.toSX(n.x), y = st.toSY(n.y);
       const base = NODE_BASE_R[n.type] || 4;
-      const r = base + Math.min(6.5, Math.sqrt(n.deg) * 1.5) + Math.min(4.5, n.weight * 0.35);
-      const isHi = n === st.hover || n === st.selected;
+      const degTerm = n.type === 'phrase' ? 0.7 : 1.35;   // 短语的度数增长也收敛些
+      const r = base + Math.min(6, Math.sqrt(n.deg) * degTerm) + Math.min(3.5, n.weight * 0.3);
+      const isHub = n.type === 'article' || n.type === 'material';
+      const level = (n.meta && n.meta.m_level) || 'unknown';
+
+      let alpha = isHub ? palette.hubAlpha : (palette[level] ?? palette.unknown);
+      // 短语是语境而不是用户的积累，压暗一档让词成为视觉主体
+      if (n.type === 'phrase') alpha *= 0.62;
+      if (focusing) alpha = near.has(n) ? Math.min(1, alpha * 1.35) : alpha * 0.28;
+      const color = isHub ? palette.hub : ink.label;
+
+      // 柔光：径向渐变，中心亮、边缘透明。平涂圆看起来像调试散点图，
+      // 有一圈光晕才有「漂浮的节点」那种质感。
+      const glowR = r * (lightTheme ? (isHub ? 1.7 : 1.35) : (isHub ? 3.4 : 2.8));
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, glowR);
+      const glowStrength = lightTheme ? alpha * 0.28 : alpha * 0.32;
+      grad.addColorStop(0, withAlpha(color, Math.min(0.95, lightTheme ? alpha * 0.55 : alpha)));
+      grad.addColorStop(0.42, withAlpha(color, glowStrength));
+      grad.addColorStop(1, withAlpha(color, 0));
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(st.toSX(n.x), st.toSY(n.y), r, 0, Math.PI * 2);
-      ctx.fillStyle = palette[n.type] || '#888';
-      ctx.globalAlpha = isHi ? 1 : 0.85;
+      ctx.arc(x, y, glowR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalAlpha = 1;
-      if (isHi) {
-        ctx.lineWidth = 1.6;
-        ctx.strokeStyle = palette.word;
+
+      // 实心核：深色主题下小一点让光晕当主体；浅色主题下大一点保证是清晰的点
+      ctx.fillStyle = withAlpha(color, Math.min(1, alpha * 1.05));
+      ctx.beginPath();
+      ctx.arc(x, y, r * (lightTheme ? 0.82 : 0.62), 0, Math.PI * 2);
+      ctx.fill();
+
+      if (n === st.hover) {
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = withAlpha(ink.label, 0.9);
+        ctx.beginPath();
+        ctx.arc(x, y, r * 0.62 + 3, 0, Math.PI * 2);
         ctx.stroke();
       }
+
+      // 记录屏幕半径，标签定位用
+      n._r = r * (lightTheme ? 0.82 : 0.62);
+      n._x = x; n._y = y;
     }
 
-    // 标签：按重要性排序 + 简易占位检测，避免糊成一团
-    ctx.font = '11px ui-monospace, monospace';
+    // ---- 标签：默认几乎不画 ----
+    // 「乱」的最大来源就是 60 个标签同时在线。Obsidian 默认只在悬停时显示，
+    // 这里照做：常显的只有枢纽（文章/材料），且压得很淡。
+    ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    const ranked = nodes
-      .filter(n => n.deg >= 2 || n.weight >= 2 || n.type === 'article' || n.type === 'material')
-      .sort((a, b) => (b.deg + b.weight) - (a.deg + a.weight))
-      .slice(0, 60);
+
     const placed = [];
-    for (const n of ranked) {
-      const text = n.label.slice(0, 18);
-      const w = ctx.measureText(text).width;
-      const px = st.toSX(n.x), py = st.toSY(n.y);
-      const y = py - 9 - Math.min(6, n.deg * 0.4);
-      const hi = n === st.hover;
-      const box = { x: px, y: y - 9, w: w + 6, h: 13 };
-      let clash = false;
+    const fits = (x, y, w, h) => {
       for (const p of placed) {
-        if (Math.abs(p.x - box.x) < (p.w + box.w) / 2 &&
-            Math.abs(p.y - box.y) < (p.h + box.h) / 2) { clash = true; break; }
+        if (Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - y) < (p.h + h) / 2) return false;
       }
-      if (clash && !hi) continue;
-      placed.push(box);
-      ctx.fillStyle = hi ? st.ink.labelHi : st.ink.label;
-      ctx.fillText(text, px, y);
+      return true;
+    };
+    const drawLabel = (n, alpha, font, size) => {
+      ctx.font = font;
+      const text = n.label.length > 22 ? n.label.slice(0, 21) + '…' : n.label;
+      const w = ctx.measureText(text).width;
+      const y = n._y + n._r + 9;
+      // 先试下方，被占就试上方，都不行就跳过 —— 宁可少标，也不要糊成一团
+      for (const yy of [y, n._y - n._r - 9]) {
+        if (fits(n._x, yy, w + 4, size + 3)) {
+          placed.push({ x: n._x, y: yy, w: w + 4, h: size + 3 });
+          ctx.fillStyle = withAlpha(ink.label, alpha);
+          ctx.fillText(text, n._x, yy);
+          return;
+        }
+      }
+    };
+
+    const SANS = 'ui-sans-serif, -apple-system, "PingFang SC", sans-serif';
+    if (!focusing) {
+      // 静止时只标一个枢纽。之前把 3 篇文章 + 1 份材料的标题全画出来，
+      // 它们本来就挤在中心，四个标题叠在一起 —— 「乱」的最后一处来源。
+      const hubs = nodes.filter(n => n.type === 'article' || n.type === 'material')
+        .sort((a, b) => (b.deg + b.weight) - (a.deg + a.weight));
+      if (hubs.length) drawLabel(hubs[0], 0.42, '10px ' + SANS, 10);
+    } else {
+      // 悬停：焦点优先，再按连接度排邻居 —— 信息量刚好，不糊
+      const ranked = [...near].filter(n => n._x !== undefined)
+        .sort((a, b) => (b.deg + b.weight) - (a.deg + a.weight));
+      for (const n of ranked) {
+        const hi = n === st.hover;
+        drawLabel(n, hi ? 0.95 : 0.6, (hi ? '12px ' : '11px ') + SANS, hi ? 12 : 11);
+      }
     }
   }
 
@@ -3102,14 +3259,19 @@ async function drawGraph() {
     const tip = $('#graphTip');
     if (!tip) return;
     if (hit) {
+      // 固定在舞台左下角，不跟随鼠标。
+      // 画布上悬停时已经会显示名字，跟随鼠标的浮层会直接压在标签上（实测重叠）。
       tip.style.display = 'block';
-      tip.style.left = (x + 14) + 'px';
-      tip.style.top = (y + 14) + 'px';
+      tip.style.left = '18px';
+      tip.style.top = 'auto';
+      tip.style.bottom = '18px';
       const m = hit.meta || {};
-      tip.innerHTML = `<b>${escapeHtml(hit.label)}</b><br>${TYPE_LABEL[hit.type] || hit.type}` +
-        (m.level ? ` · ${escapeHtml(m.level)}` : '') +
-        (m.meaning ? `<br>${escapeHtml(String(m.meaning).slice(0, 80))}` : '') +
-        (m.status ? `<br>状态：${escapeHtml(m.status)}` : '');
+      const ML = { recalled: '想得起来', recognized: '认得出来', seen: '见过面', unknown: '未接触' };
+      tip.innerHTML = `<b>${escapeHtml(hit.label)}</b>` +
+        `<div class="tip-sub">${TYPE_LABEL[hit.type] || hit.type}` +
+        (m.m_level ? ` · ${ML[m.m_level] || m.m_level}` : '') +
+        (m.level ? ` · ${escapeHtml(m.level)}` : '') + '</div>' +
+        (m.meaning ? `<div class="tip-body">${escapeHtml(String(m.meaning).slice(0, 90))}</div>` : '');
     } else {
       tip.style.display = 'none';
     }

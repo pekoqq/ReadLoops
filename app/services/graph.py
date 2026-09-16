@@ -136,7 +136,7 @@ def rebuild(include_words: bool = True, include_phrases: bool = True,
         if include_words:
             rows = db.execute(
                 """SELECT id, lemma, text, meaning, level, frequency, status,
-                          lookup_count, encounter_count
+                          lookup_count, encounter_count, m_level
                    FROM words
                    WHERE status IN ('learning','review','target') OR lookup_count > 0
                       OR encounter_count > 0
@@ -163,9 +163,12 @@ def rebuild(include_words: bool = True, include_phrases: bool = True,
                                         + (r["encounter_count"] or 0) * 0.3)
                 word_meta[label] = {
                     "ref_id": r["id"], "weight": round(weight, 2),
+                    # m_level 一并带出去：前端按掌握度给节点编码明度，
+                    # 而不是用四个饱和色相区分类型（那样看着像"AI 生成"的仪表盘）
                     "meta": {"level": r["level"], "status": r["status"],
                              "meaning": (r["meaning"] or "")[:120],
-                             "frequency": r["frequency"] or 0},
+                             "frequency": r["frequency"] or 0,
+                             "m_level": r["m_level"] or "unknown"},
                 }
 
         # ---- 2. 候选短语：清掉 quot 实体残留等垃圾
