@@ -177,6 +177,9 @@ def _generate_once(topic, opening, ending, new_words, target_phrases=None,
             reader_vocab, _src = known_set.vocab_size()
         except Exception:
             reader_vocab = 2500
+    style_targets = _style_targets()
+    shape_desc = (" → ".join(style_targets["shape"]) if style_targets["shape"]
+                  else "opening → analysis → closing")
     reader_note = ("" if reader_vocab >= 2000
                    else " (a beginner-level reader, so keep it very simple)")
 
@@ -204,10 +207,27 @@ TEXT LENGTH & SENTENCES:
 - Use compound sentences (and/but/or/so) in ~65% of sentences
 - Use relative clauses (which/that/who) in ~33% of sentences
 - Use adverbial clauses (because/although/if/when/while) in ~17% of sentences
-- Include at least 2 long complex sentences (>25 words) with nested clauses
+- **Include at least 2 clearly long sentences (28+ words) with nested clauses.**
+  This is a hard requirement, not a suggestion — real CET passages put roughly
+  10% of sentences in that range, and they are what trains reading stamina.
+  Build them by combining two ideas with a relative clause plus an adverbial clause, e.g.
+    "The findings, which came from a five-year study of 2,000 office workers who
+     spent most of their day seated, suggest that even brief periods of standing
+     may offset some of the harm."
+  Also vary sentence length deliberately: mix short punchy sentences (under 8 words)
+  with long ones, so the standard deviation of sentence length stays above 6 words.
 
 TOP CONJUNCTIONS TO USE NATURALLY:
 and, that, as, but, or, when, who, if, so, which, because, while
+
+=== GENRE & STANCE (sampled from the real exam distribution) ===
+- Genre: **{style_targets['genre']}** — write the passage as this genre
+- Author stance: **{style_targets['attitude']}** — keep this stance consistent end to end
+- Discourse shape: {shape_desc}
+  Measured across hundreds of real CET passages, the dominant organisation is:
+  an opening that introduces the issue, several body sections that analyse it
+  (each advancing one point), then a closing that concludes or suggests.
+  Follow that shape rather than a flat list of facts.
 
 VOCABULARY:
 - Average word length: 4.9 letters
@@ -400,6 +420,48 @@ def _local_vocab_parse(text: str) -> list[dict]:
 _KNOWN_CACHE: dict = {}
 
 
+_STYLE_CACHE: dict = {}
+
+
+def _style_targets() -> dict:
+    """按真题的真实分布抽样：体裁 / 作者态度 / 篇章结构骨架。
+
+    依据 `app/resources/exam_style.json`（从 375 篇真题精读数据统计得出）：
+      体裁   议论文 49.9% / 说明文 25.3% / 新闻报道 22.9% / 记叙文 1.9%
+      态度   积极支持 50.4% / 客观中立 26.9% / 消极批判 22.7%
+      结构   主导为「引入 → 分析（多段）→ 收束」
+    """
+    import random as _r
+    from pathlib import Path as _P
+
+    # 只缓存**文件内容**，不缓存抽样结果 —— 每篇文章都要重新抽，
+    # 否则同一进程内所有文章的体裁/态度/结构骨架完全一样。
+    if "data" not in _STYLE_CACHE:
+        f = _P(__file__).resolve().parent.parent / "resources" / "exam_style.json"
+        try:
+            _STYLE_CACHE["data"] = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+        except (ValueError, OSError):
+            _STYLE_CACHE["data"] = {}
+
+    d = _STYLE_CACHE["data"]
+    out = {"genre": "说明文", "attitude": "客观中立", "shape": []}
+    try:
+        def pick(dist, default):
+            ks = list(dist.keys())
+            ws = list(dist.values())
+            return _r.choices(ks, weights=ws, k=1)[0] if ks else default
+
+        out["genre"] = pick(d.get("genre", {}), "说明文")
+        out["attitude"] = pick(d.get("attitude", {}), "客观中立")
+        shapes = d.get("structure_shapes", [])
+        if shapes:
+            out["shape"] = _r.choices(
+                shapes, weights=[x["count"] for x in shapes], k=1)[0]["shape"].split(" → ")
+    except (KeyError, ValueError):
+        pass
+    return out
+
+
 def _reader_vocab() -> int:
     """读者的词汇量估计（定级结果；没测过则用默认）。"""
     try:
@@ -444,7 +506,7 @@ def _repair_once(content: str, title: str, data: dict, issues: list[str]) -> dic
 
 def _verify_and_repair(result: dict, *, known: set, target_words: list,
                        target_phrases: list, topic: str, opening: str,
-                       ending: str, max_rounds: int = 2) -> dict:
+                       ending: str, max_rounds: int = 3) -> dict:
     """校验生成结果，不达标则定向修复。
 
     返回 {"result": ..., "report": ..., "rounds": n, "ok": bool}
