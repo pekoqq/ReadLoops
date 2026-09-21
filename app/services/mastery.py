@@ -88,6 +88,17 @@ PRIOR_CLAMP = 2.0
 MIN_EXPOSURES_RECOGNIZED = 4   # Pellicer-Sánchez (2015)：3–4 次遇见后阅读速度显著变快
 MIN_CORRECT_RECALLED = 2       # 四选一有 25% 蒙对率，一次答对不足以判定回忆
 
+# **纯阅读**通往「想得起来」的门槛。
+#
+# 为什么必须有这条：原设计里 recalled 只能靠答题获得，于是**没有查词习惯、
+# 也不做测试的用户永远停在 recognized** —— 而 recognized 会被选词排除
+# （该去做提取练习），他们既不被输入也不被考，卡死在中间、词汇量原地打转。
+#
+# 依据：罗肖尼视频里的「在不同语境中重遇 ≥12 次」；Pellicer-Sánchez (2015) 的
+# 8 次遇见给出 55% 回忆率 —— 说明回忆能力随遇见次数**确实在增长**，只是慢。
+# 12 次干净遇见（见过但没查过）是「无需提取练习也能想起来」的合理经验阈值。
+MIN_EXPOSURES_RECALLED = 12
+
 LEVELS = ("unknown", "seen", "recognized", "recalled")
 
 
@@ -122,11 +133,18 @@ def level_of(*, clean: int, lookups: int, declared: int,
     也就是说反复遇见能建立「认得出来」，但撑不起「想得起来」——
     后者需要真实的提取证据（答题）。所以：
 
-      recalled   需要答题证据，纯遇见再多也不算
+      recalled   答题证据（≥2 次答对），**或 ≥12 次干净遇见**（纯阅读路径）
       recognized 需要 ≥4 次干净遇见，或用户在定级测试里声明认识
       seen       有过任何接触
+
+    ⚠️ 纯阅读路径不可省略。只保留「答题才能 recalled」的话，
+    **不查词、不做测试的用户会永远停在 recognized** —— 而 recognized 被选词排除，
+    他们既不被输入也不被考，词汇量原地打转。绝大多数用户都不会主动做题。
     """
     if correct >= MIN_CORRECT_RECALLED or (correct >= 1 and p_recall >= 0.75):
+        return "recalled"
+    # 纯阅读路径：未经提取练习，但已在不同语境里重遇足够多次
+    if clean >= MIN_EXPOSURES_RECALLED:
         return "recalled"
     if declared == 1 or clean >= MIN_EXPOSURES_RECOGNIZED:
         return "recognized"
@@ -150,16 +168,17 @@ FROM words w
 LEFT JOIN (
     -- 「机会」= 该词被埋进某篇文章（action='seen'）。
     -- 若同 (word, article) 还有 lookup 记录，说明这次机会里用户查了它。
-    SELECT we.word_id,
-           COUNT(DISTINCT we.article_id) AS exposures,
-           COUNT(DISTINCT lu.article_id) AS looked
-    FROM word_encounters we
+    -- ⚠️ 用 **words.encounter_count（耐久计数器）**，不是数 word_encounters 的行数。
+    -- 删文章会连带删掉明细，但「见过这个词 N 次」是用户的学习历史，必须活着。
+    -- 否则用户读完删文章 → 证据归零 → 掌握度回退 → 系统重新教一遍。
+    SELECT w2.id AS word_id,
+           COALESCE(w2.encounter_count, 0) AS exposures,
+           COUNT(DISTINCT lu.article_id)   AS looked
+    FROM words w2
     LEFT JOIN word_encounters lu
-           ON lu.word_id = we.word_id
-          AND lu.article_id = we.article_id
-          AND lu.action = 'lookup'
-    WHERE we.action = 'seen' AND we.article_id IS NOT NULL
-    GROUP BY we.word_id
+           ON lu.word_id = w2.id AND lu.action = 'lookup'
+    WHERE COALESCE(w2.encounter_count, 0) > 0
+    GROUP BY w2.id
 ) ev ON ev.word_id = w.id
 WHERE ev.word_id IS NOT NULL
    OR w.lookup_count > 0

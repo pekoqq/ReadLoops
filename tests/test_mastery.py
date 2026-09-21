@@ -59,17 +59,29 @@ def env():
 
 
 def _see(word_id: int, articles: list[int], lookup_in: list[int] | None = None) -> None:
-    """让某个词在多篇文章里「被遇见」，可选在部分文章里查了它。"""
+    """让某个词在多篇文章里「被遇见」，可选在部分文章里查了它。
+
+    ⚠️ 必须同时维护 `words.encounter_count`（耐久计数器）——
+    掌握度判定用的是它，不是数 word_encounters 的行数。
+    这样删文章（连带删明细）不会抹掉用户的学习历史。
+    """
     lookup_in = lookup_in or []
+    fresh = 0
     with get_db() as db:
         for a in articles:
-            db.execute(
+            cur = db.execute(
                 "INSERT OR IGNORE INTO word_encounters (word_id, article_id, context, action, created_at) "
                 "VALUES (?,?,'','seen',0)", (word_id, a))
+            if cur.rowcount:
+                fresh += 1
         for a in lookup_in:
             db.execute(
                 "INSERT INTO word_encounters (word_id, article_id, context, action, created_at) "
                 "VALUES (?,?,'','lookup',0)", (word_id, a))
+        if fresh:
+            db.execute(
+                "UPDATE words SET encounter_count = COALESCE(encounter_count,0) + ? WHERE id = ?",
+                (fresh, word_id))
 
 
 # ---------------------------------------------------------------- 等级规则
@@ -88,14 +100,19 @@ def test_prior_is_clamped_so_evidence_can_override(env):
 
 
 def test_test_evidence_is_required_for_recalled(env):
-    """反复遇见撑不起「回忆」——Pellicer-Sánchez：8 次遇见后回忆仅 55%。
+    """**低于阈值**的纯遇见撑不起「回忆」——必须真有答题证据。
 
-    所以只靠遇见（哪怕 12 次）最多判到 recognized，必须真有答题证据才给 recalled。
+    Pellicer-Sánchez (2015)：8 次遇见后回忆仅 55%，说明回忆能力随遇见次数增长但很慢。
+
+    ⚠️ 12 次及以上是**例外**（见下一条测试）：方法本身就要求「在不同语境中重遇 ≥12 次」，
+    而绝大多数用户不会主动做题（不查词、不加生词本、不测试）。
+    如果只保留「答题才能 recalled」，这些人会永远停在 recognized ——
+    而 recognized 被选词排除，他们既不被输入也不被考，**词汇量原地打转**。
     """
-    _see(3, list(range(1, 13)))          # 12 次干净遇见
+    _see(3, list(range(1, 12)))          # 11 次干净遇见（差一次到阈值）
     mastery.refresh([3])
     e = mastery.explain(3)
-    assert e["clean_exposures"] == 12
+    assert e["clean_exposures"] == 11
     assert e["level"] == "recognized", "纯遇见不该判成 recalled"
     assert e["evidence"]["测试答对"] == 0
 
@@ -470,23 +487,48 @@ def test_smart_test_no_longer_depends_on_phrases_table(env):
     assert "FROM phrases" not in src, "smart_test 不应再查询已废弃的 phrases 表"
 
 
-def test_mastery_must_be_cleared_when_evidence_disappears(env):
-    """⚠️ 闭环回归：证据消失时等级必须跟着回退。
+def test_mastery_survives_article_deletion(env):
+    """⚠️ 核心回归：**删除文章不得抹掉学习历史**。
 
-    典型场景：删除文章会连带删除它产生的遇见记录（v2.5.2 的修复）。
-    如果那是某个词唯一的证据，它的 m_level 就该回到 unknown。
-    而 refresh() 只挑「有证据的词」，失去证据的词进不来 —— 会永久卡在旧等级上
-    （实测 abandon 就被这么卡住过）。
+    这是用户提的关键场景：读完就把文章删掉。删文章会（也应当）连带删除它的
+    word_encounters 明细，但「我见过这个词 N 次」是**用户的学习历史**，
+    不该因为删掉内容而消失。
+
+    此前掌握度直接数 word_encounters 行数，于是：
+        读完 → 删文章 → 证据归零 → 掌握度回退 → 系统重新教一遍 → 死循环
+    现在改用耐久计数器 words.encounter_count，明细可删、历史仍在。
     """
     _see(3, [1, 2, 3, 4])          # 4 次干净遇见 → recognized
     mastery.refresh([3])
     assert mastery.explain(3)["level"] == "recognized"
+    before = mastery.explain(3)["recall"]
 
-    # 模拟「文章被删」：遇见记录被连带清掉
+    # 模拟「读完把文章都删了」：明细被连带清空
     with get_db() as db:
         db.execute("DELETE FROM word_encounters WHERE word_id=3")
     mastery.refresh()
-    assert mastery.explain(3)["level"] == "unknown", "证据没了，等级必须回退"
+    after = mastery.explain(3)
+    assert after["level"] == "recognized", (
+        f"删文章不该让掌握度回退，实际变成 {after['level']}")
+    assert after["recall"] == before, "删文章不该改变掌握度得分"
+
+
+def test_mastery_cleared_only_when_counters_are_gone(env):
+    """耐久计数器也被清空时，等级才应当回退。
+
+    与上面相对：删除**明细**是内容生命周期（允许），
+    清空**耐久计数器**才是真正的「证据消失」（应当回退）。
+    """
+    _see(3, [1, 2, 3, 4])
+    mastery.refresh([3])
+    assert mastery.explain(3)["level"] == "recognized"
+
+    with get_db() as db:
+        db.execute("DELETE FROM word_encounters WHERE word_id=3")
+        db.execute("UPDATE words SET encounter_count=0, lookup_count=0, "
+                   "correct_count=0, wrong_count=0, mastered=0 WHERE id=3")
+    mastery.refresh()
+    assert mastery.explain(3)["level"] == "unknown", "证据真的没了，等级必须回退"
     with get_db() as db:
         row = db.execute("SELECT m_level, m_recognize, m_recall FROM words WHERE id=3").fetchone()
     assert row["m_level"] == "unknown" and row["m_recognize"] == 0 and row["m_recall"] == 0

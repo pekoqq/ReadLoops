@@ -55,22 +55,61 @@ MIN_SANE_VOCAB = 500
 
 
 def vocab_size() -> tuple[int, str]:
-    """取用户当前的词汇量估计。返回 (词数, 来源说明)。"""
-    try:
-        from app.services import placement
+    """取用户当前的词汇量估计（**活的**，会随学习增长）。返回 (词数, 来源说明)。
 
-        rows = placement.latest_bands()
-        if rows:
-            with get_db() as db:
-                r = db.execute(
-                    "SELECT vocab_estimate, source FROM placement_runs "
-                    "ORDER BY created_at DESC, id DESC LIMIT 1").fetchone()
-            if r and r["vocab_estimate"] and r["vocab_estimate"] >= MIN_SANE_VOCAB:
-                src = "定级测试" if (r["source"] or "") == "placement" else "默认假设"
-                return int(r["vocab_estimate"]), src
+    ## 为什么必须会增长
+
+    定级测试是一次性的，如果词汇量估计永远停在那个数字上，生成的文章难度
+    也就永远不变 —— 用户**在同一水平线上打转**：认识的老是那些词，
+    新词埋不进去（因为难度的天花板没抬）。
+
+    所以估计值要随学习累积往上走：
+
+        有效词汇量 = 定级结果 + 已在定级范围之外掌握的词的贡献
+
+    实现上取「掌握的、且词频排名在定级范围之外的词数」作为增量 ——
+    这些词是用户**在学习过程中真正新拿下的**，是词汇量增长最直接的证据。
+
+    定级结果仍是地基（它代表用户读一段话时的基线识别能力），
+    增量则让难度天花板持续抬升。
+    """
+    base, src = DEFAULT_VOCAB, "默认假设"
+    try:
+        # ⚠️ 只看 placement_runs，**不要求存在分档数据** ——
+        # 分档数据用于覆盖率曲线，而这里只需要那个数字。
+        # 早先多加了 `if placement.latest_bands()` 这个前置条件，
+        # 于是没有分档行时明明有定级结果也会退回默认值。
+        with get_db() as db:
+            r = db.execute(
+                "SELECT vocab_estimate, source FROM placement_runs "
+                "ORDER BY created_at DESC, id DESC LIMIT 1").fetchone()
+        if r and r["vocab_estimate"] and r["vocab_estimate"] >= MIN_SANE_VOCAB:
+            base = int(r["vocab_estimate"])
+            src = "定级测试" if (r["source"] or "") == "placement" else "默认假设"
     except Exception:
         pass
-    return DEFAULT_VOCAB, "默认假设"
+
+    # 增量：在定级范围之外、已经能读的词。
+    #
+    # ⚠️ 统计 `recognized` **和** `recalled`，不是只统计 recalled。
+    # 理由是阅读本质上靠**识别**：一个词你「认得出来但想不起来」，
+    # 完全不影响你读懂这句话；而 recalled（能否主动回忆）反映的是产出能力，
+    # 那是写作/口语的指标，不是阅读的。
+    # 只统计 recalled 会让「只读不测」的用户永远看不到自己的进步 ——
+    # 他们能认清的词在涨，但估计值纹丝不动。
+    gained = 0
+    try:
+        with get_db() as db:
+            gained = db.execute(
+                """SELECT COUNT(*) FROM words
+                   WHERE m_level IN ('recognized', 'recalled')
+                     AND COALESCE(NULLIF(frq, 0), bnc, 0) > ?""", (base,)
+            ).fetchone()[0]
+    except Exception:
+        pass
+
+    total = base + gained
+    return total, (f"{src}" if not gained else f"{src} + 学习中新增 {gained}")
 
 
 def build(vocab: Optional[int] = None, exam: Optional[str] = None,

@@ -77,15 +77,32 @@ def record_article(article_id: int, content: str = "",
         return {"recorded": 0}
 
     now = int(time.time())
+    fresh = 0
     with get_db() as db:
-        # action='seen' 上有 (word_id, article_id) 的部分唯一索引，天然幂等
-        cur = db.executemany(
-            "INSERT OR IGNORE INTO word_encounters "
-            "(word_id, article_id, context, action, created_at) VALUES (?,?,'','seen',?)",
-            [(wid, article_id, now) for wid in id_map.values()],
-        )
-    return {"recorded": cur.rowcount if cur.rowcount is not None else len(id_map),
-            "words": len(id_map)}
+        # action='seen' 上有 (word_id, article_id) 的部分唯一索引，天然幂等。
+        #
+        # ⚠️ 同时累加 `words.encounter_count` —— 这是**耐久计数器**，
+        # 与逐篇的 word_encounters 记录并存，但用途不同：
+        #
+        #   word_encounters   逐篇明细 → 分析「在哪些篇目、哪些语境里遇见过」
+        #   encounter_count   耐久总数 → **掌握度判定的依据**
+        #
+        # 为什么必须分开：删文章会（也应当）连带删掉它的 word_encounters 明细，
+        # 但**「我见过这个词 5 次」是用户的学习历史，不该因为删掉内容而消失**。
+        # 此前掌握度直接数 word_encounters 行数，于是用户读完删文章 = 学习证据归零，
+        # 系统重新教一遍，陷入死循环。
+        for wid in id_map.values():
+            cur = db.execute(
+                "INSERT OR IGNORE INTO word_encounters "
+                "(word_id, article_id, context, action, created_at) VALUES (?,?,'','seen',?)",
+                (wid, article_id, now))
+            if cur.rowcount:
+                # 只有**真的新增了一次遇见**才累加，保证幂等
+                db.execute(
+                    "UPDATE words SET encounter_count = COALESCE(encounter_count, 0) + 1 "
+                    "WHERE id = ?", (wid,))
+                fresh += 1
+    return {"recorded": fresh, "words": len(id_map)}
 
 
 # ---------------------------------------------------------------- 查询

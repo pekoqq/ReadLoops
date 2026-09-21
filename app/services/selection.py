@@ -295,21 +295,130 @@ def select_new_words(target_count: int = 10, exam: str | None = None,
 TARGET_PHRASES = 3
 
 
+# **回锅配额**：一篇的目标词里，多大比例留给「需要再遇见」的旧词。
+#
+# ## 为什么必须有这个配额
+#
+# 原设计完全依赖分层：到期复习 → 重遇缺口 → 新词。看起来很合理，但实际会退化 ——
+# 早期没有到期词、也没有「见过 4 次以内」的词，于是**每一层都空**，
+# 全部额度被「新词」层吃掉。结果：每篇都在埋全新的词，从不等旧词回锅。
+#
+# 模拟三种读者各读 30 天 × 每天 3 篇（共 720 个目标词名额）：
+#   撒在 2,200 词的候选池里 → 平均每个词只被遇见 **0.33 次**
+#   而 recognized 需要 ≥4 次、recalled 需要 ≥12 次
+#   → **没有任何词能升级，词汇量 30 天纹丝不动**
+#
+# 这正是「一直在同一水平线上打转」的根因。方法本身要求「在不同语境中重遇 ≥12 次」，
+# 而重遇**必须有配额保障**，不能指望分层碰巧选中旧词。
+REENTRY_QUOTA = 0.75
+
+
 def select_targets(word_count: int = 10, phrase_count: int = TARGET_PHRASES,
                    exam: str | None = None,
                    exclude: set[str] | None = None) -> dict:
     """一次挑出这一篇要埋的**单词 + 短语**。
+
+    单词按 `REENTRY_QUOTA` 分成两部分：
+      - **回锅**：已有接触、但遇见次数还不够的词 —— 优先「离下一级门槛最远的」
+      - **新词**：完全没接触过的词
 
     两者刻意分开挑：它们不共享候选池，也不该互相挤占额度 ——
     视频里「短语和单词同等重要」的意思正是要各自都有位置，
     而不是让短语去抢单词的名额。
     """
     exclude = {w.lower() for w in (exclude or set())}
-    words = select_new_words(word_count, exam=exam, exclude=exclude, kind="word")
+    n_reentry = int(round(word_count * REENTRY_QUOTA))
+    n_new = max(0, word_count - n_reentry)
+
+    # ① 回锅：只从「有接触、未掌握」的池子里选
+    reentry = _select_reentry(n_reentry, exam=exam, exclude=exclude)
+    # ② 新词：从没见过面的池子里选
+    fresh = select_new_words(n_new, exam=exam,
+                             exclude=exclude | {w.lower() for w in reentry},
+                             kind="word")
+    # 回锅不够就用新词补足（新用户前几篇没有旧词可回锅）
+    if len(reentry) < n_reentry:
+        extra = select_new_words(n_reentry - len(reentry) + n_new, exam=exam,
+                                 exclude=exclude | {w.lower() for w in reentry + fresh},
+                                 kind="word")
+        fresh = fresh + extra
+    words = (reentry + fresh)[:word_count]
+
     phrases = select_new_words(phrase_count, exam=exam,
                                exclude=exclude | {w.lower() for w in words},
                                kind="phrase")
-    return {"words": words, "phrases": phrases}
+    return {"words": words, "phrases": phrases,
+            "reentry": len(reentry), "fresh": max(0, len(words) - len(reentry))}
+
+
+def _select_reentry(target_count: int, exam: str | None = None,
+                    exclude: set[str] | None = None) -> list[str]:
+    """挑「需要再遇见」的词：已有接触、还没掌握。
+
+    ## 排序：优先**最接近突破**的词（这里踩过一个反直觉的坑）
+
+    我最初按「遇见次数少的优先」排，想法是「离门槛还远的最需要补」。
+    实际效果完全相反：遇见被撒得越来越薄，**没有任何词能累积到门槛**。
+    实测只读 30 天的读者，所有词的遇见次数**卡在 3 就再也上不去** ——
+    因为每次都有大量「只见过 1 次」的新词排在前面。
+
+    正确目标是**集中火力把词推过门槛**：3 次的词只差 1 次就能成为 recognized，
+    而 1 次的词还差 3 次。所以按**遇见次数从多到少**排，
+    先把一批词推到 recognized，再从 recognized 推到 recalled，然后它们退出池子。
+
+    这也符合方法本身：习得一个词靠的是**在有限时间内足够密集的重遇**，
+    而不是把注意力摊到无限多的词上。
+    """
+    if target_count <= 0:
+        return []
+    exclude = {w.lower() for w in (exclude or set())}
+
+    # ⚠️ 这一层**刻意不套用「已知集排除」**。
+    #
+    # 已知集是「读者能读懂什么」的定义，用于覆盖率校验；但回锅层的目标是
+    # 「把词推到下一级」，而正是**升到 recognized 的词才会被加进已知集** ——
+    # 一旦套用排除，词刚有点起色就退出重遇池，**永远到不了 12 次、升不到 recalled**。
+    # 实测：只读型读者的增长曲线两天后就平掉，正是这个原因。
+    #
+    # 这一层的准入条件本身已经足够收紧：
+    #   m_level ∈ (seen, recognized)  有证据
+    #   encounter_count ∈ (0, 12)     还需要更多遇见
+    #   status != known、非功能词、有释义、长度合理
+    # 池子里不会有「用户早就认识的词」——那些没有遇见记录。
+
+    # 与其它层同样的准入条件，外加「必须有接触记录」。
+    # ⚠️ 功能词过滤不能漏：否则回锅层会把 the / and / every 当成「需要再遇见」的词
+    # （它们确实在文章里高频出现，m_level 也都是 seen）。
+    q = (
+        "SELECT lower(text) t, COALESCE(encounter_count,0) n, "
+        "       COALESCE(lookup_count,0) lk "
+        "FROM words "
+        "WHERE type = 'word' AND m_level IN ('seen','recognized') "
+        "  AND status NOT IN ('known') "
+        "  AND COALESCE(encounter_count,0) > 0 "
+        # 已经到顶（≥12 次）的交给掌握度判 recalled，不再占重遇名额
+        "  AND COALESCE(encounter_count,0) < 12 "
+        "  AND meaning IS NOT NULL AND meaning != '' "
+        "  AND length(text) BETWEEN 3 AND 18 "
+        "  AND text GLOB '[a-z]*' AND text NOT LIKE '% %' "
+        f"  {_stopword_clause('text')} "
+        # 排序：先推最接近突破的（遇见次数多），同档内查词多的优先（说明真没记住）
+        "ORDER BY COALESCE(encounter_count,0) DESC, "
+        "         COALESCE(lookup_count,0) DESC, "
+        "         COALESCE(NULLIF(frq,0), bnc, 0) ASC LIMIT ?"
+    )
+    with get_db() as db:
+        rows = db.execute(q, (target_count * 6,)).fetchall()
+
+    out: list[str] = []
+    for r in rows:
+        t = r["t"]
+        if t in exclude:
+            continue
+        out.append(t)
+        if len(out) >= target_count:
+            break
+    return out
 
 
 def explain_selection(limit: int = 10) -> dict:
