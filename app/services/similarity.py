@@ -148,6 +148,52 @@ def _load_exam_from_file(article_text, top_n=3):
     return get_article_similarity(article_text, exam_articles, top_n)
 
 
+def title_similarity(a: str, b: str) -> float:
+    """两个标题的相似度（词集 Jaccard，忽略大小写与虚词）。
+
+    ⚠️ 为什么必须单独查标题：`check_duplicate` 只比**内容**，
+    而实测生成结果的内容两两 Jaccard 最高才 0.23（阈值 0.4 基本不会触发），
+    于是**内容不重复但标题反复**的情况完全漏网。实测 30 篇里：
+      `How Technology Is Reshaping Daily Work and Life` 及其变体出现 3 次，
+      `Rethinking How College Students Learn` **完全相同地出现 2 次**。
+
+    用户看到的就是标题 —— 标题重复比内容重复更直接地让人觉得「这东西在重复产出」。
+    """
+    STOP = {"the", "a", "an", "of", "and", "or", "to", "in", "on", "for", "is", "are",
+            "how", "why", "what", "when", "that", "this", "with", "as", "at", "by"}
+    def toks(x):
+        return {w for w in re.findall(r"[a-z]+", (x or "").lower()) if w not in STOP}
+    ta, tb = toks(a), toks(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def title_repeats(title: str, recent_titles: list[str],
+                  sim_threshold: float = 0.5, opening_n: int = 2) -> str | None:
+    """标题是否与最近标题重复或过于同质。返回冲突的那个标题，否则 None。
+
+    两道检查：
+      1. **整体相似度 ≥ 0.5** —— 抓住近似重复（实测同义改写 0.67、完全相同 1.00）
+      2. **开头 n 个词相同** —— 抓住「同一句式反复用」的情况。
+         实测 `The Hidden Cost of …` 用了 5 次，但它们两两相似度只有 0.33，
+         单靠第 1 条会漏掉。开头相同比整体相似更容易让人察觉重复。
+    """
+    def opening(t: str) -> tuple:
+        ws = [w for w in re.findall(r"[a-z]+", (t or "").lower())]
+        return tuple(ws[:opening_n])
+
+    my_open = opening(title)
+    for t in recent_titles:
+        if not t:
+            continue
+        if title_similarity(title, t) >= sim_threshold:
+            return t
+        if my_open and opening(t) == my_open:
+            return t
+    return None
+
+
 def check_duplicate(article_text, recent_articles, threshold=0.4):
     """检查文章是否与最近文章重复或同质化。
     返回 (is_duplicate, max_similarity, most_similar_title)

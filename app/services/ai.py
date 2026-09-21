@@ -385,6 +385,12 @@ Naturally include these words in context (do NOT force them, do NOT list them): 
 Use each target word at least once.
 {style_profile_block}
 
+For the TITLE: make it specific to this passage, not a generic label. Avoid the
+templates that fit any article — "The Hidden Cost of X", "How Technology Is Reshaping
+X", "The Rise of X", "Why X Matters", "Rethinking X". Prefer a title that only makes
+sense for THIS passage (a concrete noun, a figure, or a specific claim). Title case,
+5-8 words, no subtitle.
+
 Return ONLY valid JSON, no markdown, no explanation:
 {{"title": "A concise title (5-8 words, title case)", "content": "The full passage (~320 words)", "new_words": ["word1", "word2"]}}"""
 
@@ -1092,17 +1098,54 @@ def generate_article(target_new_words=10):
     rhetoric_targets = _rhetoric_targets()
 
     # 题材列表
+    # 题材库：按真题的真实题材分布组织（`tools/analyze_exam_topics.py` 的聚类结果），
+    # 每类给**具体角度**而不是「科技对生活的影响」这种空泛说法。
+    # 实测旧版 10 个通用题材会让模型反复写出同一批文章（标题都撞车）。
     all_topics = [
-        "a social phenomenon or trend observed in modern society",
-        "the impact of technology on daily life or work",
-        "a health or medical study finding",
+        # 教育 / 学习（真题 30.4%）
         "an education issue or learning method",
-        "an environmental concern or solution",
-        "a workplace or career trend",
-        "a psychological finding about human behavior",
-        "a cultural tradition or social change",
-        "a small business or community project",
-        "a relationship between family members or friends",
+        "how students actually study versus how they think they study",
+        "a change in how a school teaches a traditional subject",
+        "the gap between what employers want and what graduates learn",
+        "a learning technique backed by classroom evidence",
+        "why some students keep going and others drop a course",
+        # 食品 / 农业 / 营养（16.9%）
+        "a food safety or nutrition finding",
+        "how a farming practice changed what people eat",
+        "why a traditional food is disappearing from the table",
+        "the hidden cost of cheap processed food",
+        "a change in how a city feeds itself",
+        # 居住 / 社区 / 就业（11.4%）
+        "how a neighbourhood changed over a decade",
+        "a workplace policy and what it did to employees",
+        "why a small local business survived when others closed",
+        "the trade-offs of working from home",
+        "what a community loses when a local service closes",
+        # 生活日常 / 儿童（9.5%）
+        "a small daily habit with an outsized effect",
+        "how childhood has changed in one generation",
+        "why sleep or rest is so hard to protect",
+        "what a hobby gives people that work does not",
+        # 环境 / 气候（9.5%）
+        "a local environmental problem and a practical response",
+        "how a city adapted to hotter summers",
+        "the real cost of a disposable product",
+        "an unusual approach to cutting waste",
+        # 认知 / 心理 / 决策（8.4%）
+        "a psychological finding about how people decide",
+        "why people trust a source they should question",
+        "a cognitive bias visible in everyday choices",
+        "what shapes whether people act on advice",
+        # 交通 / 科技伦理（8.1%）
+        "how a transport change altered daily routines",
+        "an ethical question raised by a new technology",
+        "what automation took over and what it could not",
+        "a technology that promised more than it delivered",
+        # 社交 / 健康（5.9%）
+        "a finding about loneliness or social connection",
+        "how social media changed the way people present themselves",
+        "a public health message that did or did not land",
+        "why a health habit is easier to start than keep",
     ]
 
     openings = [
@@ -1148,7 +1191,17 @@ def generate_article(target_new_words=10):
         if not result:
             continue
 
-        # 去重检测
+        # 去重检测：**内容与标题都要查**。
+        # 只查内容会漏掉「内容不同但标题反复」—— 实测 30 篇里有一模一样的标题。
+        from app.services.similarity import title_repeats
+        recent_titles = [a["title"] for a in recent_articles
+                         if a["title"] and a["id"] != result.get("id")]
+        clash = title_repeats(result["title"], recent_titles)
+        if clash:
+            print(f"第{attempt+1}次生成的标题与「{clash[:40]}」重复/同质，换主题重试")
+            if best_result is None:
+                best_result = result          # 保底，免得全被否掉
+            continue
         is_dup, sim, sim_title = check_duplicate(result["content"], recent_articles, threshold=0.4)
 
         if not is_dup:
