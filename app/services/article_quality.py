@@ -71,6 +71,22 @@ DASH_PER_1K_MIN = 1.5           # 破折号 —— AI 完全不用，而真题�
 PAREN_PER_1K_MIN = 2.0          # 括号
 PARA_COUNT = (6, 9)             # 段落数（真题中位 7）
 PARA_LEN_STD_MIN = 18.0         # 段落长度标准差（真题中位 26）
+# 最长段 / 最短段 的比值。真题中位 **8.67 倍**、p25 是 4.12；
+# 我们实测只有 **1.88 倍** —— 各段长度几乎一致，是最明显的模板感来源。
+# 用比值而不是标准差：它对段落数不敏感，也更容易翻译成给模型的指令。
+PARA_LEN_RATIO_MIN = 4.0
+PAREN_PER_ARTICLE_MIN = 1       # 每篇括号数（真题中位 2、p25 是 1）
+# 话题聚焦度：最高频 5 个实词的平均出现次数。
+# 真题中位 5.40、p25 是 4.40；我们实测 3.70。
+# 这是「话题是否连贯」的直接度量，比 MTLD 更容易翻译成指令。
+TOPIC_WORD_REPEAT_MIN = 4.0
+
+# 实词高频表用的停用词（计算话题聚焦度时排除）
+_TOPIC_STOP = set("""a an the and or but if while because so that this these those it its they them
+their we our you your he she his her of to in on at for with from by as is are was were be been have
+has had not no nor there here what which who when where why how all any both each few more most other
+some such than then too very can could may might must will would should about into over under between
+out up down also just even still only own same very""".split())
 
 # 陈词滥调黑名单：AI 写作最典型的模板化表达
 CLICHES = [
@@ -279,7 +295,16 @@ def structure_stats(content: str) -> dict[str, Any]:
         mean = sum(plens) / len(plens)
         para_std = (sum((x - mean) ** 2 for x in plens) / len(plens)) ** 0.5
 
+    def _ratio() -> float:
+        """最长段 / 最短段。真题中位 8.67 倍，是「段落是否有起伏」的直接度量。"""
+        if len(plens) < 3:
+            return 0.0
+        shortest = max(1, min(plens))
+        return round(max(plens) / shortest, 2)
+
     return {
+        "paren_count": content.count("("),
+        "para_len_ratio": _ratio(),
         "punct_kinds": len(kinds),
         "dash_per_1k": round(per1k("—") + per1k("–"), 2),
         "paren_per_1k": per1k("("),
@@ -288,6 +313,22 @@ def structure_stats(content: str) -> dict[str, Any]:
         "paras": len(paras),
         "para_len_std": round(para_std, 1),
     }
+
+
+def topic_repetition(content: str) -> dict[str, Any]:
+    """话题聚焦度：最高频 5 个实词各出现多少次。
+
+    真题靠**反复使用主题词**维持话题连贯（中位 5.40 次），
+    而生成结果倾向于不断换同义词（实测 3.70 次）—— 后者读起来像同义词词典，
+    而且对学习者不利：**主题词复现才带来强化**。
+    """
+    ws = [w.lower() for w in words_of(content)]
+    if not ws:
+        return {"top5": [], "avg": 0.0}
+    c = Counter(w for w in ws if w not in _TOPIC_STOP and len(w) > 3)
+    top5 = c.most_common(5)
+    return {"top5": [w for w, _ in top5],
+            "avg": round(sum(n for _, n in top5) / len(top5), 2) if top5 else 0.0}
 
 
 def cliche_hits(content: str) -> list[str]:
@@ -398,6 +439,7 @@ def analyze(
             "cliche_hits": cliche_hits(content),
         },
         "structure": structure_stats(content),
+        "topic": topic_repetition(content),
         "target_words_missing": missing,
     }
     if known is not None:
@@ -478,10 +520,23 @@ def verdict(report: dict, *, project_coverage: float = TARGET_COVERAGE) -> tuple
         if not (PARA_COUNT[0] <= st["paras"] <= PARA_COUNT[1]):
             issues.append(
                 f"段落数 {st['paras']}，真实文章通常 {PARA_COUNT[0]}–{PARA_COUNT[1]} 段。")
-        if st["para_len_std"] < PARA_LEN_STD_MIN:
+        if st["para_len_std"] < PARA_LEN_STD_MIN or st["para_len_ratio"] < PARA_LEN_RATIO_MIN:
             issues.append(
-                f"各段长度太接近（标准差 {st['para_len_std']}，真实文章约 26）—— "
-                f"读起来像模板。请让长短段交替：有的段落两三句就说清，有的展开论证。")
+                f"各段长度太接近（最长段/最短段仅 {st['para_len_ratio']} 倍，"
+                f"真实文章约 8.7 倍）—— 读起来像模板。"
+                f"请让段落长短明显交替：至少有一段只用两三句就把一个点说清，"
+                f"另有一段展开到三四倍长度。")
+        if st["paren_count"] < PAREN_PER_ARTICLE_MIN:
+            issues.append(
+                "全篇没有使用括号。真实四级文章每篇平均用 2 处括号来补充限定信息，"
+                "请自然加入至少 1 处，例如界定一个词的范围或给出一个具体数值。")
+
+    tp = report.get("topic") or {}
+    if tp.get("avg", 99) < TOPIC_WORD_REPEAT_MIN:
+        issues.append(
+            f"话题不够聚焦：最高频的 5 个实词平均只出现 {tp['avg']} 次"
+            f"（真实文章约 5.4 次）。请选定 2–3 个核心主题词并各自复现 4–6 次 —— "
+            f"这种重复是话题连贯的来源，不是缺陷。")
 
     return (not issues, issues)
 
