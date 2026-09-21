@@ -684,6 +684,82 @@ function renderArticle(article) {
   $('#readerContainer').scrollTop = 0;
   // 恢复该文章的高亮记录
   restoreHighlights(article.id);
+  // 长难句拆解：异步标注，不阻塞正文显示
+  annotateLongSentences(article.id);
+}
+
+// ---------------------------------------------------------------- 长难句拆解
+// 阅读器对**生词**有即时释义，但对**句子**此前没有任何帮助 ——
+// 而四级的核心难点恰在长难句（p90 句长 32 词、多重嵌套），是阅读理解的主要失分点。
+//
+// 拆解用 spaCy 依存句法在**服务端**实时算出（不调 AI）：即时、确定，
+// 而且读者可以**对着原文验证**每一个从句 —— 这比一段泛泛的 AI 讲解有用得多。
+async function annotateLongSentences(articleId, sentences) {
+  if (!articleId) return;
+  let list = sentences;
+  if (!list) {
+    try {
+      const r = await api.get(`/api/articles/${articleId}/sentences`);
+      list = (r && r.sentences) || [];
+    } catch (e) { return; }
+  }
+  window._longSentences = list;
+  if (!list.length) return;
+
+  const reader = $('#reader');
+  for (const [i, item] of list.entries()) {
+    const target = item.text.trim();
+    if (target.length < 12) continue;
+    // 在文本节点里找这句话（与高亮恢复同一套做法）
+    const walker = document.createTreeWalker(reader, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+      const idx = node.nodeValue.indexOf(target);
+      if (idx < 0) continue;
+      const after = node.splitText(idx);
+      after.nodeValue = after.nodeValue.slice(target.length);
+      const mark = document.createElement('span');
+      mark.className = 'long-sent';
+      mark.dataset.i = String(i);
+      mark.textContent = target;
+      after.parentNode.insertBefore(mark, after);
+      break;
+    }
+  }
+
+  $$('.long-sent').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showSentenceBreakdown(window._longSentences[+el.dataset.i]);
+    });
+  });
+}
+
+function showSentenceBreakdown(item) {
+  if (!item) return;
+  const panel = $('#sentencePanel');
+  if (!panel) return;
+  const cls = item.clauses || [];
+  panel.innerHTML = `
+    <div class="sp-head">
+      <b>长难句拆解</b>
+      <span class="sp-meta">${item.words} 词 · ${cls.length} 个从句${
+        cls.some(c => c.nested > 0) ? ' · 含嵌套' : ''}</span>
+      <button class="sp-close" id="spClose">×</button>
+    </div>
+    <div class="sp-body">${escapeHtml(item.text)}</div>
+    ${cls.length ? `<div class="sp-clauses">${cls.map(c => `
+      <div class="sp-clause">
+        <span class="sp-tag">${c.label}</span>
+        ${c.connective ? `<span class="sp-con">由 <b>${escapeHtml(c.connective)}</b> 引导</span>` : ''}
+        ${c.nested > 0 ? `<span class="sp-nest">嵌套 ${c.nested} 层</span>` : ''}
+        <div class="sp-text">${escapeHtml(c.text)}</div>
+        ${c.why ? `<div class="sp-why">${c.why}</div>` : ''}
+      </div>`).join('')}</div>`
+      : `<div class="sp-why">这句话没有从句结构，难点在于长度与插入成分。</div>`}
+  `;
+  panel.classList.add('show');
+  $('#spClose').addEventListener('click', () => panel.classList.remove('show'));
 }
 
 async function restoreHighlights(articleId) {

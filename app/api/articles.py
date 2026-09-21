@@ -112,3 +112,16 @@ async def delete_article(article_id: int):
         conn.execute("DELETE FROM word_encounters WHERE article_id = ?", (article_id,))
         conn.execute("DELETE FROM articles WHERE id = ?", (article_id,))
     return {"status": "ok", "message": "文章已删除（含它产生的遇见记录）"}
+
+
+@router.get("/{article_id}/sentences")
+async def article_sentence_analysis(article_id: int):
+    """长难句拆解 —— 阅读器的「这句读不懂」辅助。"""
+    from app.services import sentence_analysis
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT content FROM articles WHERE id = ?", (article_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="文章不存在")
+    return {"sentences": sentence_analysis.analyze_text(row["content"] or "")}

@@ -3244,3 +3244,80 @@ body.theme-transition *::after {
 @media (max-height: 520px) {
   .graph-stage { height: 78vh; }
 }
+
+/* ==========================================================================
+   长难句拆解
+   --------------------------------------------------------------------------
+   阅读器对生词有即时释义，但对句子此前毫无帮助 —— 而四级的主要失分点正是长难句。
+   标注必须**克制**：满屏下划线会把阅读变成做题。用一条极淡的左边线，
+   不打断行文节奏，只在注视时才显现。
+   ========================================================================== */
+
+.long-sent {
+  position: relative;
+  cursor: pointer;
+  border-bottom: 1px dashed var(--glass-border-strong);
+  transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out);
+}
+.long-sent:hover {
+  background: var(--glass-strong);
+  border-bottom-color: var(--accent);
+}
+
+.sentence-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 84px;
+  width: min(440px, 92vw);
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border-strong);
+  background: var(--bg-elevated, var(--bg));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  z-index: 120;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+}
+.sentence-panel.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+.sp-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px; font-size: 13px;
+}
+.sp-meta { margin-left: auto; font-size: 11px; color: var(--text-tertiary); }
+.sp-close {
+  border: none; background: transparent; cursor: pointer;
+  font-size: 18px; line-height: 1; color: var(--text-tertiary); padding: 0 2px;
+}
+.sp-close:hover { color: var(--text); }
+.sp-body {
+  font-family: "Georgia", "Songti SC", serif;
+  font-size: 14px; line-height: 1.65; color: var(--text-secondary);
+  margin-bottom: 14px; padding-bottom: 12px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.sp-clause { margin-bottom: 11px; }
+.sp-tag {
+  display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 5px;
+  background: var(--glass-strong); color: var(--text-secondary); margin-right: 6px;
+}
+.sp-con, .sp-nest { font-size: 10px; color: var(--text-tertiary); margin-right: 8px; }
+.sp-text {
+  margin-top: 5px; font-size: 12.5px; color: var(--text);
+  font-family: var(--mono); line-height: 1.5;
+}
+.sp-why { font-size: 11px; color: var(--text-tertiary); margin-top: 3px; }
+
+@media (max-width: 900px) {
+  .sentence-panel {
+    right: 0; left: 0; bottom: 0;
+    width: 100%; max-height: 66vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+}
