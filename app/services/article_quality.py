@@ -81,6 +81,11 @@ PAREN_PER_ARTICLE_MIN = 1       # 每篇括号数（真题中位 2、p25 是 1�
 # 这是「话题是否连贯」的直接度量，比 MTLD 更容易翻译成指令。
 TOPIC_WORD_REPEAT_MIN = 4.0
 
+# 目标词中「有上下文线索」的比例下限。
+# 实测真实四级文章是 **100%**（200 篇中位）—— 这不是巧合：真题的选材标准之一
+# 就是难点词可由上下文推出。我们生成的是 95%，差的 5% 那几个词等于没被教。
+CONTEXT_CLUE_MIN = 1.0
+
 # 实词高频表用的停用词（计算话题聚焦度时排除）
 _TOPIC_STOP = set("""a an the and or but if while because so that this these those it its they them
 their we our you your he she his her of to in on at for with from by as is are was were be been have
@@ -315,6 +320,72 @@ def structure_stats(content: str) -> dict[str, Any]:
     }
 
 
+# 上下文线索的六种类型 —— 分类依据是真题精读数据的实测分布
+# （2,518 条生词推断示范：定义 28%、因果 22%、对比 21%、并列 18%、构词 18%）。
+# 这些线索是「不查词典也能推出词义」的前提；**没有线索的生词等于没被教**。
+CLUE_PATTERNS = [
+    ("定义", r"\b(?:means|refers to|is called|known as|that is|in other words|"
+             r"is defined as|namely)\b|,\s+(?:a|an|the)\s+\w+\s+(?:that|which|who)"),
+    ("对比", r"\b(?:but|however|unlike|whereas|in contrast|on the other hand|"
+             r"although|though|instead|rather than)\b"),
+    ("因果", r"\b(?:because|since|therefore|thus|hence|as a result|leads? to|"
+             r"results? in|causes?|due to|owing to)\b"),
+    ("并列", r"\b(?:and|or|as well as|along with|both)\b"),
+    ("举例", r"\b(?:such as|for example|for instance|including|like|e\.g\.)\b"),
+    ("同位", r"[—–]\s*\w|\w+\s*\([^)]{3,60}\)|,\s*\w+\s*,\s*\w+"),
+]
+
+
+def context_clues(content: str, target_words: Optional[list[str]] = None) -> dict[str, Any]:
+    """目标词附近是否提供了可推断词义的上下文线索。
+
+    ## 为什么这是核心维度
+
+    产品的方法前提是「在语境中习得」—— 读者遇到生词时**能从上下文推出来**。
+    如果文章把目标词埋进去却不给任何线索，读者只能去查词典，
+    那就退化成了背单词，方法失效。
+
+    所以这个指标直接度量**文章是否可教**，而不只是「是否可读」。
+
+    检测范围：目标词所在句 + 前后各一句（线索常跨句出现）。
+    """
+
+    targets = {w.lower().strip() for w in (target_words or []) if w and w.strip()}
+    if not targets:
+        return {"checked": 0, "with_clue": 0, "ratio": 0.0, "clue_types": {}, "naked": []}
+
+    sents = sentences(content)
+    hit_types: Counter = Counter()
+    naked: list[str] = []
+    checked = 0
+
+    for i, sent in enumerate(sents):
+        low = sent.lower()
+        for w in list(targets):
+            if not re.search(r"\b" + re.escape(w) + r"\w{0,4}\b", low):
+                continue
+            checked += 1
+            window = " ".join(sents[max(0, i - 1): i + 2])
+            found = [name for name, pat in CLUE_PATTERNS
+                     if re.search(pat, window, re.I)]
+            if found:
+                for f in found:
+                    hit_types[f] += 1
+            else:
+                naked.append(w)
+
+    uniq_checked = len({w for w in targets
+                        if re.search(r"\b" + re.escape(w) + r"\w{0,4}\b",
+                                     content.lower())})
+    return {
+        "checked": uniq_checked,
+        "with_clue": uniq_checked - len(set(naked)),
+        "ratio": round((uniq_checked - len(set(naked))) / uniq_checked, 3) if uniq_checked else 0.0,
+        "clue_types": dict(hit_types),
+        "naked": sorted(set(naked))[:10],
+    }
+
+
 def topic_repetition(content: str) -> dict[str, Any]:
     """话题聚焦度：最高频 5 个实词各出现多少次。
 
@@ -440,6 +511,7 @@ def analyze(
         },
         "structure": structure_stats(content),
         "topic": topic_repetition(content),
+        "clues": context_clues(content, target_words),
         "target_words_missing": missing,
     }
     if known is not None:
@@ -530,6 +602,15 @@ def verdict(report: dict, *, project_coverage: float = TARGET_COVERAGE) -> tuple
             issues.append(
                 "全篇没有使用括号。真实四级文章每篇平均用 2 处括号来补充限定信息，"
                 "请自然加入至少 1 处，例如界定一个词的范围或给出一个具体数值。")
+
+    cl = report.get("clues") or {}
+    if cl.get("checked") and cl.get("ratio", 1.0) < CONTEXT_CLUE_MIN:
+        naked = cl.get("naked") or []
+        issues.append(
+            f"这些目标词在文中**没有任何可推断的上下文线索**：{', '.join(naked)}。"
+            f"读者只能去查词典 —— 那就退化成了背单词，而不是在语境中习得。"
+            f"请给每个词补上线索：用同位语、对比、因果、举例或括号补充说明，"
+            f"让读者能从上下文推出它的大意。")
 
     tp = report.get("topic") or {}
     if tp.get("avg", 99) < TOPIC_WORD_REPEAT_MIN:

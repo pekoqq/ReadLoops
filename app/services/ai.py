@@ -701,6 +701,25 @@ def _verify_and_repair(result: dict, *, known: set, target_words: list,
             current, report, ok, issues = fixed, cand, cand_ok, cand_issues
         else:
             break
+    # ---- 收尾补上下文线索 ----
+    # 第四处单目标定向修补。目标词若无线索，读者只能查词典 ——
+    # 那就退化成背单词，方法失效。真实四级文章这个比例是 100%。
+    cl = report.get("clues") or {}
+    if cl.get("naked"):
+        cued = _add_context_clues(current["content"], current["title"], cl["naked"])
+        if cued:
+            cand = aq.analyze(
+                cued["content"], known=known,
+                target_words=list(target_words) + list(target_phrases or []),
+                target_grammar=target_grammar or ["relative_clause", "passive"],
+            )
+            n_new = len(((cand.get("clues") or {}).get("naked")) or [])
+            if (n_new < len(cl["naked"])
+                    and cand.get("coverage", 0) >= report.get("coverage", 0) - 0.03):
+                current, report = cued, cand
+                ok, issues = aq.verdict(cand)
+                rounds += 1
+
     # ---- 收尾修结构 ----
     # 第三处「单目标定向修补」。多目标修复里，标点/段落这类**结构性**要求
     # 总是被覆盖率、目标词这些「硬指标」挤掉（模型会优先满足前者）。
@@ -785,6 +804,40 @@ def _structure_better(new: dict, old: dict) -> bool:
         or ns.get("para_len_ratio", 0) > os_.get("para_len_ratio", 99) * 1.2
         or nt.get("avg", 0) > ot.get("avg", 99) * 1.1
     )
+
+
+def _add_context_clues(content: str, title: str, naked: list[str]) -> dict | None:
+    """给「无线索」的目标词补上可推断的上下文，其余尽量不动。
+
+    真实四级文章的选材标准之一就是**难点词可由上下文推出**（实测 200 篇该比例是 100%）。
+    埋了词却不给线索，读者只能查词典 —— 方法就失效了。
+    """
+    words = ", ".join(naked)
+    prompt = (
+        f"These required words appear in the passage but a reader has **no way to "
+        f"guess what they mean** from the surrounding text: {words}\n\n"
+        "Rewrite the passage so that EACH of them can be inferred from context. "
+        "Use the kinds of clues real exam passages rely on:\n"
+        "- an appositive or definition, e.g. \"the yield (the amount harvested per acre)\"\n"
+        "- a contrast, e.g. \"unlike the earlier figures, which rose, the new ones…\"\n"
+        "- a cause or effect, e.g. \"because the soil was exhausted, the harvest…\"\n"
+        "- an example, e.g. \"staples such as rice and wheat…\"\n\n"
+        "Do NOT simply define the word in brackets every time — vary the clue type, "
+        "and keep every other sentence as it is. Same length, same difficulty.\n\n"
+        f"TITLE: {title}\n\nPASSAGE:\n{content}\n\n"
+        "Return ONLY valid JSON, no markdown, no explanation:\n"
+        '{"title": "...", "content": "the full rewritten passage"}'
+    )
+    try:
+        raw = _chat([{"role": "user", "content": prompt}], max_tokens=1500, temperature=0.5)
+        fixed = _extract_json(raw)
+    except Exception as e:
+        print(f"补线索失败: {e}")
+        return None
+    if not fixed or not fixed.get("content"):
+        return None
+    return {"title": fixed.get("title") or title, "content": fixed["content"],
+            "new_words": []}
 
 
 def _fix_structure(content: str, title: str) -> dict | None:
