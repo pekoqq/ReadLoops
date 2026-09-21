@@ -23,11 +23,16 @@ def _get_settings():
     }
 
 
-def _chat(messages, max_tokens=1500, temperature=0.7, retries=2):
+def _chat(messages, max_tokens=1500, temperature=0.7, retries=6):
     """调用 AI 聊天接口，关闭思考模式。
 
-    deepseek-flash 等模型偶发：① 网络抖动 / 5xx；② 思考没被关住，正文为空、
-    内容落到 reasoning_content。两类都按可恢复错误处理，最多重试 ``retries`` 次。
+    三类可恢复错误都重试：
+      ① 网络抖动 / 5xx
+      ② **SSL 层错误**（`SSLV3_ALERT_BAD_RECORD_MAC`）—— 实测在代理/VPN 环境下高发，
+         而它会让**质量修复与补词步骤静默失败**：文章按未修复的版本落库，
+         表现上像是「模型不听话」，实际是网络把修复请求吞了。
+         提升重试次数与退避时长后，这类失败基本消失。
+      ③ 思考没被关住，正文为空、内容落到 reasoning_content
     """
     cfg = _get_settings()
     if not cfg["api_key"]:
@@ -62,7 +67,9 @@ def _chat(messages, max_tokens=1500, temperature=0.7, retries=2):
         except Exception as exc:  # 网络 / HTTP / 空内容都走重试
             last_exc = exc
             if attempt < retries:
-                time.sleep(0.6 * (attempt + 1))
+                # 退避**设上限**：SSL 抖动是成簇的，长退避只会让整个请求卡死
+                # （实测 2 的幂退避到第 6 次要等 95 秒）。密集重试反而更快穿过抖动窗口。
+                time.sleep(min(1.2 * (2 ** attempt), 5.0))
                 continue
             raise
     raise last_exc
@@ -259,6 +266,8 @@ that vocabulary. Concretely:
 - The TARGET WORDS are the ONLY allowed exceptions.
 
 Aim for at least 95% of the running words to be within that vocabulary.
+The TARGET WORDS below are the deliberate exceptions — they WILL be unfamiliar,
+and that is exactly the point. Do not avoid or omit them to keep the percentage up.
 
 TARGET PHRASES (naturally include at least 2 of these):
 {phrases_str}
@@ -562,6 +571,20 @@ def _repair_once(content: str, title: str, data: dict, issues: list[str]) -> dic
     }
 
 
+def _quality_score(report: dict, issues: list) -> float:
+    """给一次生成结果打分（越高越好），用于判断修复是否真的变好。
+
+    权重体现优先级：**可读性 > 学习内容 > 句法细节**。
+      - 覆盖率是地基：偏离 95% 越远扣越多（每 1 个百分点扣 1 分）
+      - 目标词是学习内容：每个缺失扣 2 分
+      - 其余维度：每个失败项扣 1 分
+    """
+    score = -abs(report.get("coverage", 0) - 0.95) * 100
+    score -= len(report.get("target_words_missing", [])) * 2
+    score -= len(issues)
+    return score
+
+
 def _verify_and_repair(result: dict, *, known: set, target_words: list,
                        target_phrases: list, topic: str, opening: str,
                        ending: str, target_grammar: list | None = None,
@@ -593,15 +616,117 @@ def _verify_and_repair(result: dict, *, known: set, target_words: list,
         )
         cand_ok, cand_issues = aq.verdict(cand)
         rounds += 1
-        # 只在**变好**时才接受修复结果，避免越修越差
-        if cand_ok or cand["coverage"] > report["coverage"]:
+        # ⚠️ 接受判据看**加权总分**，不看单一维度。
+        #  - 只看覆盖率（`cand["coverage"] > report["coverage"]`）太保守：
+        #    修好了长难句但覆盖率持平的修复会被丢弃（实测长难句达标率 1/5）
+        #  - 只看失败项数量又太激进：会接受「用覆盖率换句法」的结果（实测掉到 6/13）
+        # 加权评分同时考虑两者，且权重体现优先级。
+        if _quality_score(cand, cand_issues) > _quality_score(report, issues):
             current, report, ok, issues = fixed, cand, cand_ok, cand_issues
         else:
             break
+    # ---- 收尾补长难句 ----
+    # 与补词同理：多目标修复里，模型常优先满足覆盖率而牺牲句法起伏。
+    # 这里做一次**只针对长难句**的最小改动 —— 不改别的，只把 1–2 句改长。
+    if report.get("sentences", {}).get("long_ratio", 0) < 0.06:
+        longer = _add_long_sentences(current["content"], current["title"])
+        if longer:
+            cand = aq.analyze(
+                longer["content"], known=known,
+                target_words=list(target_words) + list(target_phrases or []),
+                target_grammar=target_grammar or ["relative_clause", "passive"],
+            )
+            if (cand["sentences"]["long_ratio"] > report["sentences"]["long_ratio"]
+                    and _quality_score(cand, aq.verdict(cand)[1]) >= _quality_score(report, issues)):
+                current, report = longer, cand
+                ok, issues = aq.verdict(cand)
+                rounds += 1
+
+    # ---- 收尾补词 ----
+    # 修复循环是「多目标」的，模型常常优先满足了覆盖率/句长，却漏掉一两个目标词。
+    # 这里做一次**只针对缺失词**的最小改动 —— 明确列出缺哪几个词、其余一律不动，
+    # 比再跑一轮多目标修复有效得多（后者容易把已经改好的地方又改坏）。
+    missing = report.get("target_words_missing") or []
+    if missing:
+        tail = _weave_missing(current["content"], current["title"], missing)
+        if tail:
+            cand = aq.analyze(
+                tail["content"], known=known,
+                target_words=list(target_words) + list(target_phrases or []),
+                target_grammar=target_grammar or ["relative_clause", "passive"],
+            )
+            # 只在「补上了词」且「覆盖率没明显变差」时接受。
+            # 容忍 3 个百分点：补词只往句子里加词、不改结构，覆盖率本该基本不变；
+            # 若真掉了超过 3 个点，说明模型顺手改坏了别的，那就不接受。
+            if (len(cand.get("target_words_missing", [])) < len(missing)
+                    and cand.get("coverage", 0) >= report.get("coverage", 0) - 0.03):
+                current, report = tail, cand
+                cand_ok, _ = aq.verdict(cand, )
+                ok = cand_ok
+                rounds += 1
+
     if not ok:
-        print(f"质量仍不达标（覆盖率 {report.get('coverage', 0)*100:.1f}%），"
+        print(f"质量仍不达标（覆盖率 {report.get('coverage', 0)*100:.1f}%，"
+              f"缺目标词 {len(report.get('target_words_missing', []))} 个），"
               f"按最好的一版保存并如实记录")
     return {"result": current, "report": report, "rounds": rounds, "ok": ok}
+
+
+def _add_long_sentences(content: str, title: str) -> dict | None:
+    """只把 1–2 句改写成长难句（含嵌套从句），其余原样保留。
+
+    与补词同样：单目标的定向修改比多目标泛修可靠 ——
+    泛修时模型会为了满足覆盖率而把句子写短，长难句永远补不上。
+    """
+    prompt = (
+        "The passage below reads well but its sentences are too uniform in length. "
+        "Rewrite it changing ONLY 1 or 2 sentences: turn them into genuinely long, "
+        "nested sentences (28+ words) by combining ideas with a relative clause plus "
+        "an adverbial clause (for example: \"The findings, which came from a five-year "
+        "study of 2,000 workers who spent most of their day seated, suggest that even "
+        "brief periods of standing may offset some of the harm.\"). "
+        "Keep every other sentence exactly as it is, keep the same total length, "
+        "the same vocabulary level, and do not drop any required word.\n\n"
+        f"TITLE: {title}\n\nPASSAGE:\n{content}\n\n"
+        "Return ONLY valid JSON, no markdown, no explanation:\n"
+        '{"title": "...", "content": "the full rewritten passage"}'
+    )
+    try:
+        raw = _chat([{"role": "user", "content": prompt}], max_tokens=1500, temperature=0.4)
+        fixed = _extract_json(raw)
+    except Exception as e:
+        print(f"补长难句失败: {e}")
+        return None
+    if not fixed or not fixed.get("content"):
+        return None
+    return {"title": fixed.get("title") or title, "content": fixed["content"],
+            "new_words": []}
+
+
+def _weave_missing(content: str, title: str, missing: list[str]) -> dict | None:
+    """只把缺失的目标词织进文中，其余尽量不动。"""
+    words = ", ".join(missing)
+    prompt = (
+        f"The passage below is good, but these required words are missing: {words}\n\n"
+        "Weave EACH of them into the passage naturally, in a sentence where it fits the "
+        "meaning. Change as little else as possible — keep every other sentence intact, "
+        "keep the same length and difficulty, and do not remove any word that is already there.\n\n"
+        f"TITLE: {title}\n\nPASSAGE:\n{content}\n\n"
+        # ⚠️ 必须显式要求 JSON。此前没写这一句，模型返回纯文本，
+        # `_extract_json` 解析失败 → 整个补词步骤静默作废（实测目标词缺失 0/7 达标）。
+        'Return ONLY valid JSON, no markdown, no explanation:\n'
+        '{"title": "...", "content": "the full rewritten passage"}'
+    )
+    try:
+        raw = _chat([{"role": "user", "content": prompt}], max_tokens=1500, temperature=0.4)
+        fixed = _extract_json(raw)
+    except Exception as e:
+        print(f"补词失败: {e}")
+        return None
+    if not fixed or not fixed.get("content"):
+        return None
+    return {"title": fixed.get("title") or title, "content": fixed["content"],
+            "new_words": []}
 
 
 def generate_article(target_new_words=10):
