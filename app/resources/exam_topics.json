@@ -1,0 +1,159 @@
+{
+  "level": "CET4",
+  "passages": 273,
+  "k": 8,
+  "topics": [
+    {
+      "id": "topic_2",
+      "share": 0.304,
+      "size": 83,
+      "keywords": [
+        "students",
+        "women",
+        "school",
+        "skills",
+        "music",
+        "education",
+        "children",
+        "life",
+        "learning",
+        "teachers",
+        "schools",
+        "kids"
+      ]
+    },
+    {
+      "id": "topic_0",
+      "share": 0.1685,
+      "size": 46,
+      "keywords": [
+        "food",
+        "brain",
+        "cooking",
+        "animal",
+        "solar",
+        "energy",
+        "genetic",
+        "eating",
+        "obesity",
+        "disease",
+        "protein",
+        "meat"
+      ]
+    },
+    {
+      "id": "topic_7",
+      "share": 0.1136,
+      "size": 31,
+      "keywords": [
+        "home",
+        "living",
+        "internet",
+        "security",
+        "employees",
+        "soda",
+        "nursing",
+        "name",
+        "homes",
+        "interview",
+        "employers",
+        "phone"
+      ]
+    },
+    {
+      "id": "topic_6",
+      "share": 0.0952,
+      "size": 26,
+      "keywords": [
+        "water",
+        "sleep",
+        "island",
+        "boredom",
+        "women",
+        "students",
+        "quit",
+        "bottled",
+        "summer",
+        "dance",
+        "plastic",
+        "night"
+      ]
+    },
+    {
+      "id": "topic_5",
+      "share": 0.0952,
+      "size": 26,
+      "keywords": [
+        "pollution",
+        "bike",
+        "climate",
+        "warming",
+        "heat",
+        "ocean",
+        "global",
+        "scientists",
+        "pain",
+        "food",
+        "height",
+        "temperature"
+      ]
+    },
+    {
+      "id": "topic_3",
+      "share": 0.0842,
+      "size": 23,
+      "keywords": [
+        "wallet",
+        "trust",
+        "mind",
+        "decisions",
+        "habits",
+        "decision",
+        "wearing",
+        "others",
+        "evil",
+        "task",
+        "ourselves",
+        "success"
+      ]
+    },
+    {
+      "id": "topic_1",
+      "share": 0.0806,
+      "size": 22,
+      "keywords": [
+        "driving",
+        "cars",
+        "robots",
+        "human",
+        "contact",
+        "moral",
+        "self",
+        "children",
+        "chores",
+        "traffic",
+        "drivers",
+        "eggs"
+      ]
+    },
+    {
+      "id": "topic_4",
+      "share": 0.0586,
+      "size": 16,
+      "keywords": [
+        "fashion",
+        "teams",
+        "media",
+        "boys",
+        "employees",
+        "movies",
+        "information",
+        "social",
+        "signs",
+        "personality",
+        "society",
+        "busy"
+      ]
+    }
+  ]
+}

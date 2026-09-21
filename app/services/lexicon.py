@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Optional
 
 from app.database import get_db
@@ -40,14 +41,16 @@ def _strip_contraction(token: str) -> str:
 
 
 _WORDS: Optional[set[str]] = None
-_REV: Optional[dict[str, str]] = None
+_REV: Optional[dict[str, str]] = None          # 变形 → 原形
+_FORMS: Optional[dict[str, set[str]]] = None   # 原形 → 全部变形
 
 
 def invalidate() -> None:
-    """词库变更后调用（导入词典、新增单词等）。"""
-    global _WORDS, _REV
+    """词库变更后调用（导入词典、新增单词等）—— 清空全部缓存。"""
+    global _WORDS, _REV, _FORMS
     _WORDS = None
     _REV = None
+    _FORMS = None
 
 
 def word_set() -> set[str]:
@@ -60,34 +63,51 @@ def word_set() -> set[str]:
 
 
 def _rev_index() -> dict[str, str]:
-    """屈折形式 → 词元。来自 words.exchange 的 JSON。
+    """屈折形式 → 词元。
 
-    `exchange` 形如 {"done": "abandoned", "past": "abandoned", "ing": "abandoning"}，
-    反向即可把 abandoned/abandoning/abandons 都指回 abandon。
+    两个来源，**以预构建的 form_index 为准**：
+    1. `data/form_index.json`（tools/build_form_index.py 生成）——
+       在 exchange 之外用 spaCy 补齐了 `are`/`were`/`gotten` 这类遗漏
+    2. `words.exchange` 字段（兜底，索引不存在时用）
+
+    ⚠️ 只用 exchange 是不够的：它的 `be` 条目只有 `{"past":"was","third":"is",...}`，
+    **缺 `are` 与 `were`** —— 而 `are` 是英语第 2 高频词。
     """
     global _REV
-    if _REV is None:
-        rev: dict[str, str] = {}
-        with get_db() as db:
-            rows = db.execute(
-                "SELECT lower(text) t, exchange FROM words "
-                "WHERE exchange IS NOT NULL AND exchange != ''"
-            ).fetchall()
-        for text, ex in rows:
-            try:
-                forms = json.loads(ex)
-            except (TypeError, ValueError):
-                continue
-            if not isinstance(forms, dict):
-                continue
-            for key, val in forms.items():
-                if key == "lemma":
-                    continue
-                for form in (val if isinstance(val, list) else [val]):
-                    form = str(form).strip().lower()
-                    if form and form not in rev:
-                        rev[form] = text
+    if _REV is not None:
+        return _REV
+
+    rev: dict[str, str] = {}
+    # 优先：预构建索引的逆向
+    for lemma, forms in _forms_index().items():
+        for f in forms:
+            if f and f != lemma:
+                rev.setdefault(f, lemma)
+    if rev:
         _REV = rev
+        return _REV
+
+    # 兜底：直接用 exchange
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT lower(text) t, exchange FROM words "
+            "WHERE exchange IS NOT NULL AND exchange != ''"
+        ).fetchall()
+    for text, ex in rows:
+        try:
+            forms = json.loads(ex)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(forms, dict):
+            continue
+        for key, val in forms.items():
+            if key == "lemma" or not isinstance(val, str):
+                continue
+            for f in val.split("/"):
+                f = f.strip().lower()
+                if f and f != text:
+                    rev.setdefault(f, text)
+    _REV = rev
     return _REV
 
 
@@ -100,12 +120,18 @@ def normalize(token: str) -> Optional[str]:
     if not token:
         return None
     words = word_set()
-    if token in words:
-        return token
 
+    # ⚠️ 反查表（变形 → 原形）必须**优先于**直接命中。
+    # ECDICT 把变形词单独收录且没有词频数据：`is` 是独立条目、rank 24648，
+    # 而它的原形 `be` 的 rank 是 2。原来的 `if token in words: return token`
+    # 让 is/are/thought/being 全返回自身 → 被当成生僻词，
+    # **覆盖率被系统性低估约 9 个百分点**（实测 2,500 词档：79.0% → 87.8%）。
     rev = _rev_index()
     if token in rev:
         return rev[token]
+
+    if token in words:
+        return token
 
     # 规则兜底：词形还原表没覆盖到的（尤其 -ly / -er / -est）
     for suffix, repl in (("ies", "y"), ("es", ""), ("s", ""), ("ed", ""),
@@ -123,6 +149,78 @@ def normalize(token: str) -> Optional[str]:
 
 def normalize_all(tokens: list[str]) -> list[Optional[str]]:
     return [normalize(t) for t in tokens]
+
+
+def _forms_index() -> dict[str, set[str]]:
+    """原形 → 全部变形（含原形自身）。反向索引的逆。
+
+    ⚠️ 为什么必须有这个：ECDICT 把变形词**单独收录**且**没有词频数据** ——
+    `be` 的 rank 是 2，但它自己的变形 `is`(24648) / `are`(0) / `was` / `been`
+    各自成条且 rank 极差。于是「认识最高频 N 个词」这种判据会
+    **漏掉英语中最常见的词形**，把覆盖率系统性低估。
+
+    实测：19,205 个变形词的自身 rank 比原形差 5 倍以上
+    （thought 760 vs think 56；being 1676 vs be 2；left 771 vs leave 150）。
+
+    修法不是去改 rank（evening / willing / left 本身也是独立词，改了就错），
+    而是**已知集按「原形 + 全部变形」展开** —— 认识 think 就等于认识 thought。
+    """
+    global _FORMS
+    if _FORMS is not None:
+        return _FORMS
+
+    # 优先用预构建的权威索引（tools/build_form_index.py 生成，
+    # 在 exchange 之外用 spaCy 补齐了 are/were/gotten 这类遗漏）
+    # 随包发布的资源目录（app/resources/），不是 .gitignore 的 data/
+    fi = Path(__file__).resolve().parent.parent / "resources" / "form_index.json"
+    if fi.exists():
+        try:
+            raw = json.loads(fi.read_text(encoding="utf-8"))
+            _FORMS = {k: set(v) for k, v in raw.items()}
+            return _FORMS
+        except (ValueError, OSError):
+            pass
+
+    out: dict[str, set[str]] = {}
+    with get_db() as db:
+        for r in db.execute(
+            "SELECT text, exchange FROM words "
+            "WHERE exchange IS NOT NULL AND exchange != '' AND exchange != 'null'"
+        ):
+            base = (r["text"] or "").strip().lower()
+            if not base:
+                continue
+            try:
+                ex = json.loads(r["exchange"])
+            except (ValueError, TypeError):
+                continue
+            forms = {base}
+            for k, v in ex.items():
+                if k in ("past", "third", "done", "ing", "s", "ed", "er", "est", "pl") \
+                        and isinstance(v, str):
+                    for f in v.split("/"):
+                        f = f.strip().lower()
+                        if f:
+                            forms.add(f)
+            out.setdefault(base, set()).update(forms)
+    _FORMS = out
+    return out
+
+
+def expand_forms(lemmas) -> set[str]:
+    """把一组原形展开成「原形 + 全部变形」的表面形式集合。
+
+    构造「已知集」时必须用它，否则会更漏掉 is/are/was 这类高频变形。
+    """
+    idx = _forms_index()
+    out: set[str] = set()
+    for w in lemmas:
+        w = (w or "").strip().lower()
+        if not w:
+            continue
+        out.add(w)
+        out.update(idx.get(w, ()))
+    return out
 
 
 def resolve_ids(tokens: list[str]) -> dict[str, int]:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "readloops"
-version = "2.7.0"
+version = "2.7.1"
 description = "AI 驱动的英语阅读训练器：可理解输入 + FSRS 间隔重复"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,6 +45,9 @@ Changelog = "https://github.com/pekoqq/ReadLoops/blob/main/docs/CHANGELOG.md"
 readloops = "app.cli:main"
 
 [project.optional-dependencies]
+# 语法检测 / 长难句识别 / 具体性检测（文章质量评分器的核心）
+nlp = ["spacy>=3.8"]
+
 dev = [
     "ruff>=0.6",
     "pytest>=8.0",
@@ -56,7 +59,8 @@ dev = [
 packages = ["app", "app.api", "app.services"]
 
 [tool.setuptools.package-data]
-app = ["web/*", "web/**/*"]
+# resources/ 里有运行必需的 form_index.json（词形还原索引）与 exam_topics.json
+app = ["web/*", "web/**/*", "resources/*"]
 
 [tool.ruff]
 line-length = 120
