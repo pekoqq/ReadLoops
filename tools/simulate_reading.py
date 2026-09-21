@@ -133,7 +133,7 @@ def run_profile(name: str, cfg: dict, days: int, articles_per_day: int,
                         "recognized": levels.get("recognized", 0),
                         "recalled": levels.get("recalled", 0)})
 
-    first, last = history[0], history[-1]
+    last = history[-1]
     return {"name": name, "history": history,
             "vocab_start": base_vocab, "vocab_end": last["vocab"],
             "recalled": last["recalled"], "recognized": last["recognized"],
