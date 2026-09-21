@@ -236,6 +236,41 @@ These are chosen because recent passages under-used them — the rotation is how
 core CET structures get practised over time. Build them into real sentences;
 do not bolt them on artificially.
 
+=== PUNCTUATION & PARAGRAPH STRUCTURE (measured from real CET passages) ===
+Real CET passages are **not** written in plain comma-and-period prose. Measured
+across 273 genuine CET-4 passages, they typically use **8 different punctuation marks**
+and rely on these to carry information:
+
+- **Em dashes (—)** — to insert an explanation or a sharp aside. Real passages use
+  roughly 2.7 per 1,000 words. AI-written text uses almost none, which is one of the
+  clearest tells that a text is machine-made. Use 1–2 naturally.
+- **Parentheses ( )** — to qualify or add a detail. Real passages use roughly 4 per
+  1,000 words. Use 1–2 naturally.
+- **Semicolons and colons** — to link or introduce. Use them where they genuinely fit.
+
+Do NOT sprinkle these mechanically — that is just a different kind of artificiality.
+Use them where a real writer would.
+
+**Paragraphs:** real passages run **6–9 paragraphs**, and the paragraphs are
+**visibly unequal** — some are two sentences that state a point outright, others
+develop one at length. Do not write five paragraphs of nearly identical length;
+that template shape is itself a machine signature.
+
+=== TOPIC FOCUS (do not chase variety for its own sake) ===
+Real exam passages **repeat their key terms**. A passage about crop yields says
+"yield" again and again, because that is what it is about. Measured lexical diversity
+(MTLD) of genuine CET-4 passages is around **106** — noticeably *lower* than typical
+AI output, which keeps swapping in fresh synonyms.
+
+So: choose the two or three terms that name your subject and **let them recur**.
+Resist the urge to paraphrase your own key words. A passage that never repeats itself
+reads like a thesaurus, not like an article.
+
+Concretely: pick 2–3 **topic terms** (e.g. "yield", "farmland", "harvest") and use
+each of them **3–5 times** across the passage. That repetition is not a flaw to be
+avoided — it is how a real article holds a subject together, and it is also what
+lets a reader meet the same word several times in one sitting.
+
 === GENRE & STANCE (sampled from the real exam distribution) ===
 - Genre: **{style_targets['genre']}** — write the passage as this genre
 - Author stance: **{style_targets['attitude']}** — keep this stance consistent end to end
@@ -625,6 +660,25 @@ def _verify_and_repair(result: dict, *, known: set, target_words: list,
             current, report, ok, issues = fixed, cand, cand_ok, cand_issues
         else:
             break
+    # ---- 收尾修结构 ----
+    # 第三处「单目标定向修补」。多目标修复里，标点/段落这类**结构性**要求
+    # 总是被覆盖率、目标词这些「硬指标」挤掉（模型会优先满足前者）。
+    # 单独就结构改一次，它才会真的被处理。
+    st = report.get("structure") or {}
+    if st and (st.get("punct_kinds", 9) < 6 or st.get("paren_per_1k", 9) < 2.0
+               or st.get("para_len_std", 99) < 18):
+        shaped = _fix_structure(current["content"], current["title"])
+        if shaped:
+            cand = aq.analyze(
+                shaped["content"], known=known,
+                target_words=list(target_words) + list(target_phrases or []),
+                target_grammar=target_grammar or ["relative_clause", "passive"],
+            )
+            if _quality_score(cand, aq.verdict(cand)[1]) > _quality_score(report, issues):
+                current, report = shaped, cand
+                ok, issues = aq.verdict(cand)
+                rounds += 1
+
     # ---- 收尾补长难句 ----
     # 与补词同理：多目标修复里，模型常优先满足覆盖率而牺牲句法起伏。
     # 这里做一次**只针对长难句**的最小改动 —— 不改别的，只把 1–2 句改长。
@@ -670,6 +724,41 @@ def _verify_and_repair(result: dict, *, known: set, target_words: list,
               f"缺目标词 {len(report.get('target_words_missing', []))} 个），"
               f"按最好的一版保存并如实记录")
     return {"result": current, "report": report, "rounds": rounds, "ok": ok}
+
+
+def _fix_structure(content: str, title: str) -> dict | None:
+    """只修标点与段落结构，内容与用词尽量不动。
+
+    实测：真实四级文章的标点种类中位 8 种、段落长度标准差 26；
+    我们的生成结果只有 4 种、标准差 12 —— 结构过于规整是最明显的「机器感」来源
+    （文献也证实 AI 文本会压缩结构熵、把复杂标点压到基线的 3–23%）。
+    """
+    prompt = (
+        "The passage below is fine in content but its **punctuation and paragraph "
+        "shape** are too plain — it reads like machine-written prose. Rewrite it "
+        "changing only the form, not the substance, so that:\n"
+        "- it uses a wider range of punctuation: at least one em dash (—) for an "
+        "inserted explanation, at least one pair of parentheses ( ) for a qualifying "
+        "detail, and a semicolon or colon where one genuinely fits;\n"
+        "- the paragraphs become visibly **unequal** — let some state a point in two "
+        "sentences while others develop an idea at length;\n"
+        "- keep 6–9 paragraphs, the same length, the same vocabulary level, and every "
+        "required word that is already there.\n\n"
+        "Do not sprinkle punctuation mechanically; put it where a real writer would.\n\n"
+        f"TITLE: {title}\n\nPASSAGE:\n{content}\n\n"
+        "Return ONLY valid JSON, no markdown, no explanation:\n"
+        '{"title": "...", "content": "the full rewritten passage"}'
+    )
+    try:
+        raw = _chat([{"role": "user", "content": prompt}], max_tokens=1500, temperature=0.5)
+        fixed = _extract_json(raw)
+    except Exception as e:
+        print(f"修结构失败: {e}")
+        return None
+    if not fixed or not fixed.get("content"):
+        return None
+    return {"title": fixed.get("title") or title, "content": fixed["content"],
+            "new_words": []}
 
 
 def _add_long_sentences(content: str, title: str) -> dict | None:

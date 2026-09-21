@@ -46,8 +46,31 @@ MAX_CONSECUTIVE_NEW = 2                     # 连续 3 个生词会直接卡住�
 SPECIFICITY_MIN = 5             # 数字 + 专名 + 引述 的总数下限
 NUMBERS_MIN, NAMES_MIN = 3, 2
 
-LEXICAL_DIVERSITY_MIN = 60.0    # MTLD；低于此值说明用词重复、有 AI 味
+LEXICAL_DIVERSITY_MIN = 60.0    # MTLD 下限；低于此值说明用词重复、有 AI 味
 REPEAT_NGRAM_MAX = 0.05         # 重复 4-gram 占比上限
+
+# ---------------------------------------------------------------- 去 AI 味：实测校准的真题画像
+#
+# 以下阈值来自**把我们的生成文章与 273 篇真实四级真题逐维对比**，
+# 而非拍脑袋。对比暴露的差距（真题中位 / 我们中位）：
+#
+#   MTLD（词汇丰富度）      105.7 / 179.6   我们**过高 1.7 倍**
+#   标点种类                  8   /   4      只有一半
+#   破折号 ‰                  2.72 /  0      完全不用
+#   括号 ‰                    4.27 /  0      完全不用
+#   段落长度标准差           26.35 / 12.89   段落过于均匀
+#   段落数                     7   /   5
+#
+# 与文献一致：AI 文本被证实「压缩话语与结构熵」「把复杂标点压到基线的 3.2–23.2%」
+# （arXiv:2605.28826），而**词汇丰富度**是跨模型跨领域最稳健的判别特征
+# （arXiv:2606.04177）。
+LEXICAL_DIVERSITY_MAX = 150.0   # 上界：超过真题太多说明缺乏话题连贯、为变化而变化
+PUNCT_KINDS_MIN = 6             # 至少用 6 种标点（真题中位 8）
+# 每 1000 词的目标出现次数（真题中位）
+DASH_PER_1K_MIN = 1.5           # 破折号 —— AI 完全不用，而真题常见
+PAREN_PER_1K_MIN = 2.0          # 括号
+PARA_COUNT = (6, 9)             # 段落数（真题中位 7）
+PARA_LEN_STD_MIN = 18.0         # 段落长度标准差（真题中位 26）
 
 # 陈词滥调黑名单：AI 写作最典型的模板化表达
 CLICHES = [
@@ -237,6 +260,36 @@ def repeat_ngram_ratio(text: str, n: int = 4) -> float:
 
 # ---------------------------------------------------------------- 陈词滥调
 
+def structure_stats(content: str) -> dict[str, Any]:
+    """标点与篇章结构统计 —— 去 AI 味的核心维度。
+
+    这些维度来自实测对比（见文件顶部注释）：AI 文本的破绽不只是「用词像 AI」，
+    更明显的是**结构过于规整** —— 标点种类少、段落长度均匀、不敢用破折号和括号。
+    真实文章在这些地方是「不整齐」的。
+    """
+    words = max(1, len(words_of(content)))
+    kinds = {c for c in content if c in ';,:—–-()"' + "'" + '?!'}
+    def per1k(ch: str) -> float:
+        return round(content.count(ch) * 1000 / words, 2)
+
+    paras = [p for p in content.split("\n") if p.strip()]
+    plens = [len(words_of(p)) for p in paras]
+    para_std = 0.0
+    if len(plens) > 1:
+        mean = sum(plens) / len(plens)
+        para_std = (sum((x - mean) ** 2 for x in plens) / len(plens)) ** 0.5
+
+    return {
+        "punct_kinds": len(kinds),
+        "dash_per_1k": round(per1k("—") + per1k("–"), 2),
+        "paren_per_1k": per1k("("),
+        "colon_per_1k": per1k(":"),
+        "semicolon_per_1k": per1k(";"),
+        "paras": len(paras),
+        "para_len_std": round(para_std, 1),
+    }
+
+
 def cliche_hits(content: str) -> list[str]:
     low = content.lower()
     return [c for c in CLICHES if c in low]
@@ -344,6 +397,7 @@ def analyze(
             "repeat_4gram": repeat_ngram_ratio(content),
             "cliche_hits": cliche_hits(content),
         },
+        "structure": structure_stats(content),
         "target_words_missing": missing,
     }
     if known is not None:
@@ -404,6 +458,30 @@ def verdict(report: dict, *, project_coverage: float = TARGET_COVERAGE) -> tuple
         issues.append(f"用词重复度高（MTLD {report['style']['mtld']}），请换用更多样的表达。")
     if report["style"]["repeat_4gram"] > REPEAT_NGRAM_MAX:
         issues.append(f"存在重复短语（{report['style']['repeat_4gram']*100:.1f}%），请改写。")
+
+    # ---- 结构层面的 AI 味（实测校准，见文件顶部注释）----
+    st = report.get("structure") or {}
+    if st:
+        mt = report["style"]["mtld"]
+        if mt and mt > LEXICAL_DIVERSITY_MAX:
+            issues.append(
+                f"用词过于求变（MTLD {mt}，真实四级文章约 106）—— 这说明文章缺少话题焦点。"
+                f"请围绕一个主题词反复展开，让核心词自然复现，而不是每句都换新词。")
+        if st["punct_kinds"] < PUNCT_KINDS_MIN:
+            issues.append(
+                f"标点过于单一（只用了 {st['punct_kinds']} 种，真实文章约 8 种）。"
+                f"请自然使用破折号、括号、分号、冒号来组织信息，而不是全靠逗号和句号。")
+        elif st["dash_per_1k"] < DASH_PER_1K_MIN:
+            issues.append("完全没有使用破折号 —— 真实文章用它插入解释或转折，请自然用上 1–2 处。")
+        if st["paren_per_1k"] < PAREN_PER_1K_MIN:
+            issues.append("没有使用括号 —— 真实文章用它补充限定信息，请自然用上 1–2 处。")
+        if not (PARA_COUNT[0] <= st["paras"] <= PARA_COUNT[1]):
+            issues.append(
+                f"段落数 {st['paras']}，真实文章通常 {PARA_COUNT[0]}–{PARA_COUNT[1]} 段。")
+        if st["para_len_std"] < PARA_LEN_STD_MIN:
+            issues.append(
+                f"各段长度太接近（标准差 {st['para_len_std']}，真实文章约 26）—— "
+                f"读起来像模板。请让长短段交替：有的段落两三句就说清，有的展开论证。")
 
     return (not issues, issues)
 
