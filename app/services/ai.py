@@ -132,7 +132,7 @@ def _select_new_words(target_count):
 
 
 def _generate_once(topic, opening, ending, new_words, target_phrases=None,
-                   reader_vocab: int = 0, target_grammar=None):
+                   reader_vocab: int = 0, target_grammar=None, rhetoric=None):
     """单次生成文章，不做去重检测。"""
     import json as _json
 
@@ -191,6 +191,15 @@ def _generate_once(topic, opening, ending, new_words, target_phrases=None,
     grammar_targets = list(target_grammar) if target_grammar else _grammar_targets()
     grammar_lines = "\n".join(f"  - {GRAMMAR_LABEL[g]}" for g in grammar_targets)
     sentence_examples = "\n".join(f"  · {e}" for e in _sentence_examples(3))
+    rhetoric_targets = rhetoric or _rhetoric_targets()
+    _RH = {"对比": "contrast (unlike / by contrast / whereas)",
+           "数据": "concrete figures (numbers, percentages, years)",
+           "引用": "one or two citations (a study, survey or institution)",
+           "举例": "an example introduced with such as / for example",
+           "反问": "one rhetorical question near the opening",
+           "因果": "cause and effect (because / as a result / leads to)"}
+    rhetoric_lines = ("\n".join(f"  - include: {_RH[k]}" for k, v in rhetoric_targets.items() if v)
+                      or "  - (a plain expository passage — no particular devices required)")
     style_targets = _style_targets()
     shape_desc = (" → ".join(style_targets["shape"]) if style_targets["shape"]
                   else "opening → analysis → closing")
@@ -282,6 +291,23 @@ Concretely: pick 2–3 **topic terms** (e.g. "yield", "farmland", "harvest") and
 each of them **3–5 times** across the passage. That repetition is not a flaw to be
 avoided — it is how a real article holds a subject together, and it is also what
 lets a reader meet the same word several times in one sitting.
+
+=== ARGUMENTATION (measured across 273 real CET-4 passages) ===
+CET-4 passages are expository or argumentative, and the way they build an argument is
+remarkably consistent. Measured coverage of each device in real passages:
+
+- **Contrast (95%)** — "unlike the earlier figures", "by contrast", "whereas"
+- **Figures (79%)** — concrete numbers and years
+- **Cause and effect (69%)** — "because", "as a result", "leads to"
+- **Citation (65%)** — a study, survey or institution. Use **at most one or two**;
+  citing something in every paragraph reads like padding, and real passages do not.
+- **Examples (52%)** — "such as", "for example". Aim for at least one concrete example.
+- **Rhetorical question (51%)** — **half of all real passages contain one.**
+  It is how they raise the issue or steer the reader's thinking. Include **one**
+  — usually near the opening, though not always as the very first sentence.
+
+Use these as a checklist, not as a recipe: a passage that mechanically ticks every box
+is just as artificial as one that uses none.
 
 === GENRE & STANCE (sampled from the real exam distribution) ===
 - Genre: **{style_targets['genre']}** — write the passage as this genre
@@ -605,6 +631,22 @@ def _sentence_examples(k: int = 3) -> list[str]:
     return out
 
 
+# 论证手法的**真实出现概率**（实测 273 篇真题正文）。
+# 关键点：这些是**概率**，不是「每篇都必须」。真实文章是有变化的 ——
+# 强制每篇都用全部六种，会制造出另一种整齐（"清单式"文章），
+# 和一篇什么都不用同样不自然。
+RHETORIC_PROB = {
+    "对比": 0.95, "数据": 0.79, "因果": 0.69,
+    "引用": 0.65, "举例": 0.52, "反问": 0.51,
+}
+
+
+def _rhetoric_targets() -> dict[str, bool]:
+    """按真实概率抽样，决定本篇要包含哪些论证手法。"""
+    import random as _r
+    return {k: _r.random() < p for k, p in RHETORIC_PROB.items()}
+
+
 def _reader_vocab() -> int:
     """读者的词汇量估计（定级结果；没测过则用默认）。"""
     try:
@@ -664,6 +706,7 @@ def _quality_score(report: dict, issues: list) -> float:
 def _verify_and_repair(result: dict, *, known: set, target_words: list,
                        target_phrases: list, topic: str, opening: str,
                        ending: str, target_grammar: list | None = None,
+                       rhetoric: dict | None = None,
                        max_rounds: int = 3) -> dict:
     """校验生成结果，不达标则定向修复。
 
@@ -701,6 +744,34 @@ def _verify_and_repair(result: dict, *, known: set, target_words: list,
             current, report, ok, issues = fixed, cand, cand_ok, cand_issues
         else:
             break
+    # ---- 收尾补论证手法 ----
+    rc = (report.get("rhetoric") or {}).get("counts") or {}
+    want = rhetoric or {}
+    # 只对**本篇抽样要求**的手法做修补 —— 没要求的不强求（真实文章本就有取舍）
+    need_q = bool(want.get("反问")) and rc.get("反问", 1) < 1
+    need_eg = bool(want.get("举例")) and rc.get("举例", 1) < 1
+    too_cite = bool(want.get("引用")) and rc.get("引用", 0) > 4
+    if rc and (need_q or need_eg or too_cite):
+        rh = _fix_rhetoric(current["content"], current["title"],
+                           rc.get("反问", 0) if need_q else 1,
+                           rc.get("举例", 0) if need_eg else 2,
+                           rc.get("引用", 0) if too_cite else 0)
+        if rh:
+            cand = aq.analyze(
+                rh["content"], known=known,
+                target_words=list(target_words) + list(target_phrases or []),
+                target_grammar=target_grammar or ["relative_clause", "passive"],
+            )
+            nc = (cand.get("rhetoric") or {}).get("counts") or {}
+            better = (nc.get("反问", 0) > rc.get("反问", 0)
+                      or nc.get("举例", 0) > rc.get("举例", 0)
+                      or (nc.get("引用", 99) < rc.get("引用", 0)
+                          and nc.get("反问", 0) >= rc.get("反问", 0)))
+            if better and cand.get("coverage", 0) >= report.get("coverage", 0) - 0.03:
+                current, report = rh, cand
+                ok, issues = aq.verdict(cand)
+                rounds += 1
+
     # ---- 收尾补上下文线索 ----
     # 第四处单目标定向修补。目标词若无线索，读者只能查词典 ——
     # 那就退化成背单词，方法失效。真实四级文章这个比例是 100%。
@@ -804,6 +875,51 @@ def _structure_better(new: dict, old: dict) -> bool:
         or ns.get("para_len_ratio", 0) > os_.get("para_len_ratio", 99) * 1.2
         or nt.get("avg", 0) > ot.get("avg", 99) * 1.1
     )
+
+
+def _fix_rhetoric(content: str, title: str, n_q: int, n_eg: int,
+                  n_cite: int) -> dict | None:
+    """只补论证手法，内容与用词尽量不动。
+
+    实测真实四级文章的配比：对比 95%、数据 79%、因果 69%、**引用 65%**、
+    **举例 52%**、**反问 51%**。而生成结果里引用偏多（100%）、
+    举例偏少（20%）、反问极少（13%）—— prompt 里有引导但模型不照做。
+    """
+    wants = []
+    if n_q < 1:
+        wants.append("add ONE rhetorical question near the opening — real passages use "
+                     "one in about half of all cases, to raise the issue or steer the "
+                     "reader (e.g. \"Why do so many people…?\")")
+    if n_eg < 2:
+        wants.append("add at least one concrete example introduced with \"such as\" or "
+                     "\"for example\" — real passages support claims with specifics")
+    if n_cite > 4:
+        wants.append(f"reduce the number of citation phrases from {n_cite} to one or "
+                     f"two — real passages cite a source in about 65% of cases, usually "
+                     f"once, not in every paragraph")
+    if not wants:
+        return None
+    body = "\n".join(f"- {w}" for w in wants)
+    prompt = (
+        "The passage below is good in content but its **argumentation** does not match "
+        "how real CET-4 passages are built. Fix exactly this:\n\n"
+        f"{body}\n\n"
+        "Change as little else as possible: keep the same topic, length, vocabulary "
+        "level, paragraph count, and every required word already present.\n\n"
+        f"TITLE: {title}\n\nPASSAGE:\n{content}\n\n"
+        "Return ONLY valid JSON, no markdown, no explanation:\n"
+        '{"title": "...", "content": "the full rewritten passage"}'
+    )
+    try:
+        raw = _chat([{"role": "user", "content": prompt}], max_tokens=1500, temperature=0.5)
+        fixed = _extract_json(raw)
+    except Exception as e:
+        print(f"补论证手法失败: {e}")
+        return None
+    if not fixed or not fixed.get("content"):
+        return None
+    return {"title": fixed.get("title") or title, "content": fixed["content"],
+            "new_words": []}
 
 
 def _add_context_clues(content: str, title: str, naked: list[str]) -> dict | None:
@@ -965,6 +1081,8 @@ def generate_article(target_new_words=10):
 
     # 语法点轮转：整篇（含修复）用同一组目标，保证一致性
     grammar_targets = _grammar_targets()
+    # 论证手法按真实概率抽样，同样整篇一致
+    rhetoric_targets = _rhetoric_targets()
 
     # 题材列表
     all_topics = [
@@ -1018,7 +1136,8 @@ def generate_article(target_new_words=10):
 
         result = _generate_once(topic, opening, ending, new_words, target_phrases,
                                 reader_vocab=_reader_vocab(),
-                                target_grammar=grammar_targets)
+                                target_grammar=grammar_targets,
+                                rhetoric=rhetoric_targets)
         if not result:
             continue
 
@@ -1056,6 +1175,7 @@ def generate_article(target_new_words=10):
         opening=opening,
         ending=ending,
         target_grammar=grammar_targets,
+        rhetoric=rhetoric_targets,
     )
     best_result = quality["result"]
 

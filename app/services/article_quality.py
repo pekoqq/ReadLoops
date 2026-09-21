@@ -86,6 +86,34 @@ TOPIC_WORD_REPEAT_MIN = 4.0
 # 就是难点词可由上下文推出。我们生成的是 95%，差的 5% 那几个词等于没被教。
 CONTEXT_CLUE_MIN = 1.0
 
+# ---------------------------------------------------------------- 论证手法
+#
+# 真实四级文章的论证手法覆盖面（实测 273 篇真题正文）：
+#   对比 95.2% · 数据 79.1% · 因果 68.9% · 引用 64.5% · 举例 51.6% · 反问 50.5%
+#
+# 对比我们的生成结果（15 篇）：对比 100% · 数据 100% · 因果 86.7% ·
+# **引用 100%（过度）** · **举例 20%（不足）** · **反问 13.3%（严重不足）**。
+#
+# 「引用」超标是因为 prompt 要求「cite studies, experts」却没给上限；
+# 「反问」不足是因为 prompt 只把「以问句开头」列为五个开篇选项之一 ——
+# 而真实文章里一半都有设问句（不只是开头）。
+RHETORIC_PATTERNS = {
+    "对比": r"\b(?:but|however|by contrast|in contrast|unlike|whereas|"
+            r"on the other hand|although|while|rather than|instead)\b",
+    "引用": r"\b(?:researchers?|scientists?|according to|a (?:new )?study|"
+            r"surveys?|experts?|reports?|found that|showed that)\b",
+    "举例": r"\b(?:such as|for example|for instance|including|e\.g\.)\b",
+    "数据": r"\b\d+(?:\.\d+)?\s*(?:%|percent|million|billion|thousand)?\b",
+    "反问": r"\?",
+    "因果": r"\b(?:because|since|therefore|thus|hence|as a result|"
+            r"leads? to|results? in|due to)\b",
+}
+# 目标覆盖面（真题实测值）。用区间而非单点，避免矫枉过正。
+RHETORIC_TARGETS = {
+    "反问": (0.25, 1.0),      # 真题 50.5%，先要求至少 1 处设问
+    "举例": (0.35, 1.0),      # 真题 51.6%
+}
+
 # 实词高频表用的停用词（计算话题聚焦度时排除）
 _TOPIC_STOP = set("""a an the and or but if while because so that this these those it its they them
 their we our you your he she his her of to in on at for with from by as is are was were be been have
@@ -386,6 +414,19 @@ def context_clues(content: str, target_words: Optional[list[str]] = None) -> dic
     }
 
 
+def rhetoric_stats(content: str) -> dict[str, Any]:
+    """论证手法的使用情况。
+
+    四级文章是**说明文/议论文**，它的「修辞」主要是**怎么把道理说清楚**：
+    对比、举例、引用、因果、数据、设问。真实文章的用法有稳定的配比，
+    而我们生成的结果在「举例」和「反问」上明显不足、在「引用」上过度。
+    """
+    used = {}
+    for name, pat in RHETORIC_PATTERNS.items():
+        used[name] = len(re.findall(pat, content, re.I))
+    return {"counts": used, "kinds": sum(1 for v in used.values() if v)}
+
+
 def topic_repetition(content: str) -> dict[str, Any]:
     """话题聚焦度：最高频 5 个实词各出现多少次。
 
@@ -512,6 +553,7 @@ def analyze(
         "structure": structure_stats(content),
         "topic": topic_repetition(content),
         "clues": context_clues(content, target_words),
+        "rhetoric": rhetoric_stats(content),
         "target_words_missing": missing,
     }
     if known is not None:
@@ -611,6 +653,23 @@ def verdict(report: dict, *, project_coverage: float = TARGET_COVERAGE) -> tuple
             f"读者只能去查词典 —— 那就退化成了背单词，而不是在语境中习得。"
             f"请给每个词补上线索：用同位语、对比、因果、举例或括号补充说明，"
             f"让读者能从上下文推出它的大意。")
+
+    rh = report.get("rhetoric") or {}
+    rc = rh.get("counts") or {}
+    if rc:
+        if rc.get("反问", 1) < 1:
+            issues.append(
+                "全篇没有一处设问句。真实四级文章里**一半都有** —— "
+                "设问是引出论点、引导读者思路的常用手段。"
+                "请在开篇或段首加一处问句（不必多，一处即可）。")
+        if rc.get("举例", 1) < 2:
+            issues.append(
+                "几乎没有举例。真实四级文章约一半会用具体例子支撑论点。"
+                "请用 such as / for example 引入一到两个具体事例。")
+        if rc.get("引用", 0) > 4:
+            issues.append(
+                f"引用套话过多（{rc['引用']} 处）。真实文章约 65% 会引用，"
+                f"但通常集中在一两处；现在的密度读起来像堆砌。请精简。")
 
     tp = report.get("topic") or {}
     if tp.get("avg", 99) < TOPIC_WORD_REPEAT_MIN:
