@@ -128,7 +128,12 @@ def _tier_sql(kind: str, vocab_floor: int = 0) -> tuple[str, str, str]:
     """
     where = _KIND_WHERE[kind]
     if vocab_floor > 0 and kind == "word":
-        where += f" AND COALESCE(NULLIF(frq, 0), bnc, 0) > {int(vocab_floor)}"
+        # ⚠️ 必须给「查过的词」开例外。
+        # 频率假设说「rank 240 的 study 你认识」，但你**实际查过它** ——
+        # 查词记录是更硬的证据。不给例外的话，被查过的常见词
+        # 会同时被频率下推和已知集剔除双重排除，永远进不了重遇。
+        where += (f" AND (COALESCE(NULLIF(frq, 0), bnc, 0) > {int(vocab_floor)}"
+                  f" OR COALESCE(lookup_count, 0) > 0)")
     rank = _KIND_RANK[kind]
     rank_ok = _KIND_RANK_POSITIVE[kind]
     tier1 = f"""
@@ -139,27 +144,49 @@ def _tier_sql(kind: str, vocab_floor: int = 0) -> tuple[str, str, str]:
           AND srs_due IS NOT NULL AND srs_due <= ?
         ORDER BY srs_due ASC LIMIT ?
     """
+    # ---- 第 2 层：重遇 ----
+    # ⚠️ 这一层原来的判据是 `clean > 0 AND clean < 4`（clean = 见过但**没查过**的次数），
+    # 结果**逻辑是反的**：一个词你查得越多、越记不住，clean 越低，越会被排除出重遇。
+    # 实测 `study`（lookup_count=1、遇见 0 次）永远进不了这一层。
+    #
+    # 新判据：查词次数是**最重要的正信号** —— 你反复查的词正是最该在不同语境再遇见的。
+    # 依据：Pellicer-Sánchez (2015) / graded readers 研究都指向「≥12 次不同语境遇见」
+    # 才可能习得；而查词行为直接暴露了哪些词还没习得。
     tier2 = f"""
-        SELECT w.id, w.text, {rank.replace('frequency', 'w.frequency').replace('frq', 'w.frq').replace('bnc', 'w.bnc')} AS rank,
-               COALESCE(ev.clean, 0) AS clean
+        SELECT w.id, w.text,
+               {rank.replace('frequency', 'w.frequency').replace('frq', 'w.frq').replace('bnc', 'w.bnc')} AS rank,
+               COALESCE(w.lookup_count, 0) AS lookups,
+               COALESCE(ev.seen_n, 0) AS seen_n,
+               COALESCE(ev.clean, 0) AS clean,
+               COALESCE(ev.last_ts, 0) AS last_ts,
+               (
+                   3.0 * MIN(COALESCE(w.lookup_count, 0), 5)
+                 + 2.0 * (12 - MIN(COALESCE(ev.seen_n, 0), 12))
+                 + 1.0 * MIN((strftime('%s','now') - COALESCE(ev.last_ts, 0)) / 864000.0, 3.0)
+                 - 2.0 * MIN(COALESCE(ev.clean, 0), 6)
+               ) AS score
         FROM words w
-        JOIN (
-            SELECT we.word_id,
-                   COUNT(DISTINCT we.article_id) - COUNT(DISTINCT lu.article_id) AS clean
-            FROM word_encounters we
-            LEFT JOIN word_encounters lu
-                   ON lu.word_id = we.word_id AND lu.article_id = we.article_id
-                  AND lu.action = 'lookup'
-            WHERE we.action = 'seen' AND we.article_id IS NOT NULL
-            GROUP BY we.word_id
+        LEFT JOIN (
+            SELECT word_id,
+                   COUNT(DISTINCT article_id) AS seen_n,
+                   SUM(CASE WHEN action = 'seen' THEN 1 ELSE 0 END) AS seen_rows,
+                   COUNT(DISTINCT CASE WHEN action = 'seen' THEN article_id END)
+                     - COUNT(DISTINCT CASE WHEN action = 'lookup' THEN article_id END) AS clean,
+                   MAX(created_at) AS last_ts
+            FROM word_encounters
+            WHERE article_id IS NOT NULL
+            GROUP BY word_id
         ) ev ON ev.word_id = w.id
         WHERE {where.replace('type =', 'w.type =').replace('meaning IS', 'w.meaning IS')
                       .replace('meaning !=', 'w.meaning !=').replace('text GLOB', 'w.text GLOB')
                       .replace('text NOT LIKE', 'w.text NOT LIKE').replace('text LIKE', 'w.text LIKE')
                       .replace('length(text)', 'length(w.text)')}
           AND w.status NOT IN ('known')
-          AND w.m_level = 'seen' AND ev.clean > 0 AND ev.clean < 4
-        ORDER BY ev.clean DESC, rank ASC LIMIT ?
+          -- 见过面或认得出来，但**还没掌握**（recalled 会被下面的 m_level 条件排除）
+          AND w.m_level IN ('seen', 'recognized')
+          -- 有证据才值得重遇：查过 或 见过
+          AND (COALESCE(w.lookup_count, 0) > 0 OR COALESCE(ev.seen_n, 0) > 0)
+        ORDER BY score DESC, rank ASC LIMIT ?
     """
     tier34 = f"""
         SELECT id, text, {rank} AS rank

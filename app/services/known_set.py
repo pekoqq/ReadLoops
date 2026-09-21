@@ -84,7 +84,18 @@ def build(vocab: Optional[int] = None, exam: Optional[str] = None) -> set[str]:
         ):
             lemmas.add(r["t"])
 
-    # ③ 展开成「原形 + 全部变形」
+        # ③ **查过词的要从已知集里剔除** —— 这是比词频更硬的证据。
+        # 频率假设说「认识 top-N 就等于认识 study」，但你**实际查过它**，
+        # 说明当时不认识。不让查词证据覆盖词频假设的话，
+        # 被查过的常见词永远进不了重遇（实测 study：lookup=1 却被排除）。
+        looked_up = {
+            r["t"] for r in db.execute(
+                "SELECT lower(text) t FROM words WHERE COALESCE(lookup_count, 0) > 0")
+        }
+
+    lemmas -= looked_up
+
+    # ④ 展开成「原形 + 全部变形」
     from app.services import lexicon
 
     return lexicon.expand_forms(lemmas)

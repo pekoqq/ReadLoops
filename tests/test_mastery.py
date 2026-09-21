@@ -189,11 +189,29 @@ def test_selection_excludes_recalled(env):
 
 
 def test_selection_prefers_reentry_gap(env):
-    """见过的词优先再遇见（重遇缺口），而不是一直教全新的词。"""
+    """见过的词要能被选上（重遇缺口），而不是一直只教全新的词。"""
     _see(3, [1, 2])                   # rare 见过 2 次
     mastery.refresh()
-    picked = selection.select_new_words(1, exam="cet4")
-    assert picked and picked[0].lower() == "rare"
+    picked = [w.lower() for w in selection.select_new_words(3, exam="cet4")]
+    assert "rare" in picked, f"见过的 rare 应当入选：{picked}"
+
+
+def test_looked_up_words_outrank_merely_seen(env):
+    """⚠️ 核心回归：**查过的词**必须比**只见过的词**更优先重遇。
+
+    这一层的旧判据是 `clean > 0`（clean = 见过但没查过的次数），
+    于是**逻辑是反的**：你查得越多、越记不住，越会被排除出重遇。
+    实测 `study`（lookup_count=1、遇见 0 次）永远进不了这一层。
+
+    新判据把查词次数作为最重要的正信号 —— 查词行为直接暴露了哪些词还没习得，
+    而「≥12 次不同语境遇见」正是习得的前提（Pellicer-Sánchez 2015）。
+    """
+    _see(3, [1, 2])                   # rare 只见过 2 次（fixture 里 looked 有 lookup_count=1）
+    mastery.refresh()
+    picked = [w.lower() for w in selection.select_new_words(3, exam="cet4")]
+    assert "looked" in picked and "rare" in picked, f"两者都应入选：{picked}"
+    assert picked.index("looked") < picked.index("rare"), (
+        f"查过的 looked 应排在只见过的 rare 之前：{picked}")
 
 
 def test_selection_respects_target_exam(env):

@@ -745,8 +745,63 @@ def get_generator(count=20, difficulty="mixed", source="all"):
     return result
 
 
+# 合法可查询单词：单个英文词，允许连字符与撇号
+_LOOKUP_WORD_RE = re.compile(r"^[A-Za-z][A-Za-z'\-]*$")
+
+
+def is_lookupable_word(text: str) -> bool:
+    """判断查词输入是否是**一个词**。
+
+    ⚠️ 这是必须的守卫。此前 `lookup_word` 对任何查不到的字符串都会
+    `INSERT INTO words` —— 用户选中任意文本（甚至跨词的碎片）都会造出一条词条。
+    实测库里被这样污染出 17 条垃圾：`ecen`、`urnal, s`、`telegr`、
+    `Why Do Students Forget What`、`o wonder why they cannot recall facts dur`……
+    它们随后会被重遇机制当成「目标生词」，是实实在在的数据损坏。
+
+    多词输入应当走 `/translate`（整句翻译），不该进词典。
+    """
+    t = (text or "").strip()
+    if not t or len(t) < 2 or len(t) > 24:
+        return False
+    if not _LOOKUP_WORD_RE.match(t):
+        return False
+    # 全是连字符 / 撇号的不算
+    if sum(1 for c in t if c.isalpha()) < 2:
+        return False
+
+    # ⚠️ 拒绝「词典某词的真子串」—— 那是用户**部分选中**造成的碎片。
+    # 实测污染出 `ecen` / `recen` / `telegr`（分别来自 recent / telegraph 的部分选取），
+    # 形状完全合法、长度也够，只有比对词典才能识别。
+    # 注意要排除「本身就是词」的情况（如 `art` 是 `party` 的子串但也是词）。
+    try:
+        with get_db() as db:
+            row = db.execute(
+                "SELECT frq, bnc FROM words WHERE lower(text)=? LIMIT 1", (t.lower(),)
+            ).fetchone()
+            # 自身有词频数据 = 确实是个词，放行
+            if row and (row["frq"] or row["bnc"]):
+                return True
+            # 自身没有任何词频数据，却只是某个**有词频的更长词**的一部分 → 碎片。
+            # 必须比对「有词频」的词：因为碎片自己也被写进过词典（自引用），
+            # 只查「是否存在于词典」会被自己的污染骗过。
+            hit = db.execute(
+                "SELECT 1 FROM words WHERE lower(text) LIKE ? "
+                "AND length(text) >= length(?) + 2 AND text NOT LIKE '% %' "
+                "AND (COALESCE(frq, 0) > 0 OR COALESCE(bnc, 0) > 0) LIMIT 1",
+                (f"%{t.lower()}%", t)).fetchone()
+            if hit:
+                return False
+    except Exception:
+        pass
+    return True
+
+
 def lookup_word(word):
-    """查询单词释义。"""
+    """查询单词释义。
+
+    查词是**只读**操作：查不到的词不落库（加词是「+ 生词」的职责）。
+    见 `is_lookupable_word` 的说明与 2.9.2 的 CHANGELOG。
+    """
     with get_db() as conn:
         row = conn.execute(
             "SELECT id, text, meaning, phonetic FROM words WHERE text = ?", (word,)
@@ -771,19 +826,20 @@ Return ONLY valid JSON:
             existing = conn.execute("SELECT id FROM words WHERE text = ?", (word,)).fetchone()
             now = int(time.time())
             if existing:
+                # 只**更新**已有词条（补上释义），绝不新建。
                 conn.execute(
                     "UPDATE words SET meaning=?, phonetic=?, updated_at=? WHERE id=?",
                     (meaning, phonetic, now, existing["id"]),
                 )
                 wid = existing["id"]
             else:
-                cur = conn.execute(
-                    "INSERT INTO words (lemma, text, type, meaning, phonetic, level, source, "
-                    "created_at, updated_at) "
-                    "VALUES (?, ?, 'word', ?, ?, 'CET4', 'ai', ?, ?)",
-                    (word, word, meaning, phonetic, now, now),
-                )
-                wid = cur.lastrowid
+                # ⚠️ 查不到的词**不落库**。
+                # 查词是「看释义」，加词是「+ 生词」—— 两件事不该混淆。
+                # 此前这里会 INSERT，于是用户选中任意文本（甚至跨词碎片）
+                # 都会造出一条词条，实测污染出 17 条垃圾
+                # （`ecen` / `urnal, s` / `Why Do Students Forget What` …），
+                # 而它们随后会被重遇机制当成「目标生词」。
+                wid = None
         return Word(id=wid, text=word, meaning=meaning, phonetic=phonetic)
     except Exception as e:
         print(f"查词失败: {e}")

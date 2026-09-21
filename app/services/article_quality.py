@@ -244,7 +244,8 @@ def cliche_hits(content: str) -> list[str]:
 
 # ---------------------------------------------------------------- 覆盖率
 
-def coverage_report(content: str, known: set[str]) -> dict[str, Any]:
+def coverage_report(content: str, known: set[str],
+                    target_words: Optional[list[str]] = None) -> dict[str, Any]:
     """覆盖率 + 越界词 + 最长连续生词。
 
     `known` 是**已知词集合**（lemma 形式小写）。用 project 自己的 lexicon 口径
@@ -256,15 +257,33 @@ def coverage_report(content: str, known: set[str]) -> dict[str, Any]:
     if not toks:
         return {"coverage": 0.0, "out_of_level": [], "max_consecutive": 0, "unknown_count": 0}
 
-    flags, unknown_counter = [], Counter()
+    # 目标词是**有意**埋进去的学习对象，不该算进「读不懂」。
+    # i+1 说的是「95% 的词你认识，剩下 5% 正是要学的」——
+    # 把目标词算作未知会双重计数：既要求埋词，又因为埋了词而判覆盖率不达标。
+    targets = set()
+    for w in (target_words or []):
+        wl = w.lower().strip()
+        if not wl:
+            continue
+        targets.add(wl)
+        n = lexicon.normalize(wl)
+        if n:
+            targets.add(n)
+
+    flags, unknown_counter, non_target = [], Counter(), []
     for t in toks:
         lemma = lexicon.normalize(t)
         hit = bool(lemma) and (lemma in known or t.lower() in known)
+        is_target = t.lower() in targets or (bool(lemma) and lemma in targets)
         flags.append(hit)
-        if not hit and lemma:
+        if not is_target:
+            non_target.append(hit)
+        if not hit and lemma and not is_target:
             unknown_counter[lemma] += 1
 
     cov = sum(flags) / len(flags)
+    # 主指标：只看**非目标词**的覆盖率（这才是 i+1 的判据）
+    cov_nt = (sum(non_target) / len(non_target)) if non_target else cov
 
     # 最长连续生词（连续 3 个会直接卡住理解）
     longest = cur = 0
@@ -275,7 +294,9 @@ def coverage_report(content: str, known: set[str]) -> dict[str, Any]:
     # 越界词按「词频无关的难度」排序：出现次数多 + 词形长的优先替换
     out = sorted(unknown_counter, key=lambda w: (-unknown_counter[w], -len(w)))[:25]
     return {
-        "coverage": round(cov, 4),
+        "coverage": round(cov_nt, 4),          # 主指标：非目标词覆盖率
+        "coverage_all": round(cov, 4),         # 含目标词的总体覆盖率（参考）
+        "target_tokens": len(flags) - len(non_target),
         "unknown_count": sum(1 for f in flags if not f),
         "total_tokens": len(flags),
         "out_of_level": out,
@@ -326,7 +347,7 @@ def analyze(
         "target_words_missing": missing,
     }
     if known is not None:
-        report.update(coverage_report(content, known))
+        report.update(coverage_report(content, known, target_words))
     return report
 
 
