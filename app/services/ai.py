@@ -306,8 +306,15 @@ remarkably consistent. Measured coverage of each device in real passages:
   It is how they raise the issue or steer the reader's thinking. Include **one**
   — usually near the opening, though not always as the very first sentence.
 
-Use these as a checklist, not as a recipe: a passage that mechanically ticks every box
-is just as artificial as one that uses none.
+**Which of these YOUR passage must include has already been decided.** The list was
+sampled to match the real distribution — real passages vary, so yours should too:
+
+{rhetoric_lines}
+
+**Use ONLY the devices listed above.** The others are *not* required for this passage.
+Do not add a rhetorical question, an example, or an extra citation merely because you
+know they are common: a passage that mechanically ticks every box is just as artificial
+as one that uses none. If something is not in the list, leave it out.
 
 === GENRE & STANCE (sampled from the real exam distribution) ===
 - Genre: **{style_targets['genre']}** — write the passage as this genre
