@@ -121,7 +121,7 @@ def _select_new_words(target_count):
 
 
 def _generate_once(topic, opening, ending, new_words, target_phrases=None,
-                   reader_vocab: int = 0):
+                   reader_vocab: int = 0, target_grammar=None):
     """单次生成文章，不做去重检测。"""
     import json as _json
 
@@ -177,6 +177,8 @@ def _generate_once(topic, opening, ending, new_words, target_phrases=None,
             reader_vocab, _src = known_set.vocab_size()
         except Exception:
             reader_vocab = 2500
+    grammar_targets = list(target_grammar) if target_grammar else _grammar_targets()
+    grammar_lines = "\n".join(f"  - {GRAMMAR_LABEL[g]}" for g in grammar_targets)
     style_targets = _style_targets()
     shape_desc = (" → ".join(style_targets["shape"]) if style_targets["shape"]
                   else "opening → analysis → closing")
@@ -219,6 +221,13 @@ TEXT LENGTH & SENTENCES:
 
 TOP CONJUNCTIONS TO USE NATURALLY:
 and, that, as, but, or, when, who, if, so, which, because, while
+
+=== TARGET GRAMMAR (rotated so every structure gets exercised) ===
+Your passage MUST contain each of these, **at least twice**:
+{grammar_lines}
+These are chosen because recent passages under-used them — the rotation is how all
+core CET structures get practised over time. Build them into real sentences;
+do not bolt them on artificially.
 
 === GENRE & STANCE (sampled from the real exam distribution) ===
 - Genre: **{style_targets['genre']}** — write the passage as this genre
@@ -462,6 +471,55 @@ def _style_targets() -> dict:
     return out
 
 
+# 四级大纲的核心语法点（顺序即轮转优先级）
+GRAMMAR_POINTS = [
+    "relative_clause", "adverbial_clause", "nominal_clause",
+    "non_finite", "passive", "perfect_tense",
+]
+GRAMMAR_LABEL = {
+    "relative_clause": "relative clauses (which / that / who)",
+    "adverbial_clause": "adverbial clauses (because / although / if / when / while)",
+    "nominal_clause": "noun clauses (that / what / whether + clause as subject or object)",
+    "non_finite": "non-finite verbs (participles, gerunds, infinitives as modifiers)",
+    "passive": "passive voice (be + past participle)",
+    "perfect_tense": "perfect tenses (have/has/had + past participle)",
+}
+
+
+def _grammar_targets(n_recent: int = 8, k: int = 4) -> list[str]:
+    """**语法点轮转**：优先安排最近几篇没覆盖到的语法点。
+
+    ## 为什么需要轮转
+
+    只在 prompt 里固定列几个语法要求，会导致**偏心**：模型会反复写它擅长的结构。
+    实测连续几篇文章里 `passive`（被动语态）一直是 0 —— 而它是四级大纲的核心考点，
+    也是新闻体最常用的结构之一。
+
+    做法：分析最近 N 篇文章**实际达标**（某语法点出现 ≥2 次）的情况，
+    优先选达标篇数最少的 —— 于是没被写到的结构会被主动补上。
+
+    这样每篇文章目标 3–4 个语法点，跨篇累积后大纲覆盖面自然完整。
+    """
+    from app.services.article_quality import grammar_counts
+
+    counts = {g: 0 for g in GRAMMAR_POINTS}
+    try:
+        with get_db() as db:
+            rows = db.execute(
+                "SELECT content FROM articles ORDER BY created_at DESC, id DESC LIMIT ?",
+                (n_recent,)).fetchall()
+        for r in rows:
+            got = grammar_counts(r["content"] or "")
+            for g in GRAMMAR_POINTS:
+                if got.get(g, 0) >= 2:      # 这一篇在该语法点上达标
+                    counts[g] += 1
+    except Exception:
+        pass
+    # 达标篇数少的优先；同分时按固定顺序，保证轮转稳定可预期
+    order = {g: i for i, g in enumerate(GRAMMAR_POINTS)}
+    return sorted(GRAMMAR_POINTS, key=lambda g: (counts[g], order[g]))[:k]
+
+
 def _reader_vocab() -> int:
     """读者的词汇量估计（定级结果；没测过则用默认）。"""
     try:
@@ -506,7 +564,8 @@ def _repair_once(content: str, title: str, data: dict, issues: list[str]) -> dic
 
 def _verify_and_repair(result: dict, *, known: set, target_words: list,
                        target_phrases: list, topic: str, opening: str,
-                       ending: str, max_rounds: int = 3) -> dict:
+                       ending: str, target_grammar: list | None = None,
+                       max_rounds: int = 3) -> dict:
     """校验生成结果，不达标则定向修复。
 
     返回 {"result": ..., "report": ..., "rounds": n, "ok": bool}
@@ -517,7 +576,7 @@ def _verify_and_repair(result: dict, *, known: set, target_words: list,
     report = aq.analyze(
         current["content"], known=known,
         target_words=list(target_words) + list(target_phrases or []),
-        target_grammar=["relative_clause", "passive"],
+        target_grammar=target_grammar or ["relative_clause", "passive"],
     )
     ok, issues = aq.verdict(report)
     rounds = 0
@@ -530,7 +589,7 @@ def _verify_and_repair(result: dict, *, known: set, target_words: list,
         cand = aq.analyze(
             fixed["content"], known=known,
             target_words=list(target_words) + list(target_phrases or []),
-            target_grammar=["relative_clause", "passive"],
+            target_grammar=target_grammar or ["relative_clause", "passive"],
         )
         cand_ok, cand_issues = aq.verdict(cand)
         rounds += 1
@@ -560,6 +619,9 @@ def generate_article(target_new_words=10):
                                  exclude=_get_recent_used_words(30))
     new_words = picked["words"]
     target_phrases = picked["phrases"]
+
+    # 语法点轮转：整篇（含修复）用同一组目标，保证一致性
+    grammar_targets = _grammar_targets()
 
     # 题材列表
     all_topics = [
@@ -612,7 +674,8 @@ def generate_article(target_new_words=10):
         ending = random.choice(endings)
 
         result = _generate_once(topic, opening, ending, new_words, target_phrases,
-                                reader_vocab=_reader_vocab())
+                                reader_vocab=_reader_vocab(),
+                                target_grammar=grammar_targets)
         if not result:
             continue
 
@@ -649,6 +712,7 @@ def generate_article(target_new_words=10):
         topic=topic,
         opening=opening,
         ending=ending,
+        target_grammar=grammar_targets,
     )
     best_result = quality["result"]
 
