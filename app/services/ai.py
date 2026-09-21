@@ -190,6 +190,7 @@ def _generate_once(topic, opening, ending, new_words, target_phrases=None,
             reader_vocab = 2500
     grammar_targets = list(target_grammar) if target_grammar else _grammar_targets()
     grammar_lines = "\n".join(f"  - {GRAMMAR_LABEL[g]}" for g in grammar_targets)
+    sentence_examples = "\n".join(f"  · {e}" for e in _sentence_examples(3))
     style_targets = _style_targets()
     shape_desc = (" → ".join(style_targets["shape"]) if style_targets["shape"]
                   else "opening → analysis → closing")
@@ -229,6 +230,13 @@ TEXT LENGTH & SENTENCES:
      may offset some of the harm."
   Also vary sentence length deliberately: mix short punchy sentences (under 8 words)
   with long ones, so the standard deviation of sentence length stays above 6 words.
+
+  **Real CET-4 long sentences look like this** (taken verbatim from past papers —
+  56% of the 2,975 sentences of 24+ words in real passages use nested clauses,
+  and their median length is 29 words):
+{sentence_examples}
+  Do not copy them — write two sentences of your own built the same way: a main
+  clause carrying a relative clause and an adverbial or noun clause inside it.
 
 TOP CONJUNCTIONS TO USE NATURALLY:
 and, that, as, but, or, when, who, if, so, which, because, while
@@ -566,6 +574,35 @@ def _grammar_targets(n_recent: int = 8, k: int = 4) -> list[str]:
     # 达标篇数少的优先；同分时按固定顺序，保证轮转稳定可预期
     order = {g: i for i, g in enumerate(GRAMMAR_POINTS)}
     return sorted(GRAMMAR_POINTS, key=lambda g: (counts[g], order[g]))[:k]
+
+
+_PATTERN_CACHE: dict = {}
+
+
+def _sentence_examples(k: int = 3) -> list[str]:
+    """从**真实四级真题**里挑几条长难句作为写作范例。
+
+    抽象指令（"至少 2 句 28 词以上、含嵌套从句"）对长句的约束力很弱 ——
+    实测模型照样写全短句。而给出**真实例句**后，模型能照着结构写。
+
+    数据来自 `tools/build_sentence_patterns.py`：从 544 篇真题精读里解析出的
+    2,975 句 ≥24 词的句子，其中 **56% 含嵌套从句**，中位长度 29 词、p90 44 词。
+    """
+
+    if "d" not in _PATTERN_CACHE:
+        from pathlib import Path as _P
+        f = _P(__file__).resolve().parent.parent / "resources" / "sentence_patterns.json"
+        try:
+            _PATTERN_CACHE["d"] = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+        except (ValueError, OSError):
+            _PATTERN_CACHE["d"] = {}
+    d = _PATTERN_CACHE["d"]
+    pats = [p for p in d.get("patterns", []) if "nested" in p.get("pattern", "")]
+    out: list[str] = []
+    for p in pats[:k]:
+        if p.get("examples"):
+            out.append(p["examples"][0])
+    return out
 
 
 def _reader_vocab() -> int:

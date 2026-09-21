@@ -1,0 +1,131 @@
+{
+  "source": "真题精读数据的句子（crawl_exam_analysis.py 抓取）",
+  "sentences_analyzed": 1955,
+  "min_words": 24,
+  "length": {
+    "median": 30,
+    "p90": 44
+  },
+  "patterns": [
+    {
+      "pattern": "advcl+ccomp+xcomp+nested",
+      "share": 0.0486,
+      "count": 95,
+      "examples": [
+        "The teachers must be free to teach in their own way—the curriculum should be flexible enough so that they can use their individual talents to achieve the goals of the course.",
+        "When your child throws her spoon on the floor for the sixth time as you try to feed her, and you say, \"That's enough! I will not pick up your spoon again!\"",
+        "Even if Steel does happen to be among that tiny minority, says Bostock, it's \"pretty irresponsible\" to suggest that 20-hour days are simply a question of discipline for the rest of us."
+      ]
+    },
+    {
+      "pattern": "advcl+ccomp+nested",
+      "share": 0.045,
+      "count": 88,
+      "examples": [
+        "\"You feel the same emotions—it is just as raw, just as fresh… You can't turn off that stream of memories, no matter how hard you try.\" Veiseh agrees. O",
+        "His own work showed that although the narrow winners did get much more money in the near future, the actual performance of the close losers was just as good. H",
+        "\"Seasoned interviewers will know whether an interviewee is researching while on the phone. The interviewer can often even hear the typing as they ask the question,\" he adds. J"
+      ]
+    },
+    {
+      "pattern": "relcl",
+      "share": 0.0379,
+      "count": 74,
+      "examples": [
+        "He was also a skilled and sophisticated organizer, an entrepreneurial innovator, who mastered the use of corporate strategy, media relations, government lobbying, international diplomacy, patents, and prosecution. C",
+        "Participants who were heavy viewers of rags-to-riches programmes or frequent viewers had a stronger belief in the American Dream than those who never watched such shows.",
+        "Perhaps there is less to fight about, with the country in a period of tranquility and the dangers of drug abuse and other unwholesome behavior well known. F"
+      ]
+    },
+    {
+      "pattern": "relcl+ccomp+nested",
+      "share": 0.0348,
+      "count": 68,
+      "examples": [
+        "The team found that residents of the developments that had received the leaflets believed it more likely that local officers would find out about illegal activity than residents of the control areas.",
+        "\"There are plenty of soft skills that gamers can utilise in a professional setting, such as teamwork, problem solving and strategic planning,\" says Ryan Gardner, a regional director with Hays recruitment. E",
+        "This type of mechanism is exactly what more than 130 countries signed onto in 2021, with implementation of a 15% minimum tax set to begin soon in the EU, U.K., Japan, Indonesia and many other countries."
+      ]
+    },
+    {
+      "pattern": "relcl+advcl+ccomp+nested",
+      "share": 0.0343,
+      "count": 67,
+      "examples": [
+        "It wasn't until after I had accepted admission to an out-of-state school that I learned that I could not use my Ohio Medicaid on campus for anything other than emergency care. G",
+        "That calls for additional research—Lev and her coauthors have published a toolkit that other municipalities can follow to study the value of their own wild spaces—and clear communication of the results. P",
+        "\"Not enough time to transition in a non-MRS situation to get anything done, and in an MRS situation, not quite enough time to recover for the next meeting,\" says researcher Joseph Allen. G"
+      ]
+    },
+    {
+      "pattern": "advcl",
+      "share": 0.0338,
+      "count": 66,
+      "examples": [
+        "Once upon a time, it was just customary for a bride to take her groom's last name as her own and abandon her maiden name completely. B",
+        "Although in-flight infections thrive in dry environments like airplanes, your risk of getting sick from an airplane is actually low because of the air filters used.",
+        "But with wages still relatively flat and the economy increasingly divided between the well-off and the long-term unemployed, more people worry about the opposite, deflation("
+      ]
+    },
+    {
+      "pattern": "relcl+advcl+ccomp+xcomp+nested",
+      "share": 0.0322,
+      "count": 63,
+      "examples": [
+        "\"While we didn't want to create any unnecessary panic, we did find some concerns that were troublesome, and we thought that parents or at least physicians should be aware of those potential risks,\" Steinberg says. G",
+        "The UN's Food and Agriculture Organisation reckons that by 2050 global food production would have to rise by about 70% over its level of 2009 to meet demand from a population that is growing in numbers and appetite. C",
+        "\"Blue became the color of choice because it's a conservative, agreeable, corporate shade that symbolizes being trustworthy and safe. That's why you see it used in all of the older airlines like British Airways,\" Nigel Goode added."
+      ]
+    },
+    {
+      "pattern": "plain",
+      "share": 0.0286,
+      "count": 56,
+      "examples": [
+        "Under the Washington bill, public universities would accept two years of computer science classes in place of two years of foreign language for admission purposes. G",
+        "Parts of Africa are getting warmer much faster than the average, with southern Africa witnessing roughly twice the global warming rate over the last half century.",
+        "At the University of California (UC), we pride ourselves not only on the quality of our research, but also on its contribution to improving our world."
+      ]
+    },
+    {
+      "pattern": "relcl+ccomp+xcomp+nested",
+      "share": 0.0266,
+      "count": 52,
+      "examples": [
+        "They were less likely to quit their jobs; indeed, over the next four years, they were 40% less likely to quit than those who kept working under the old policies. J",
+        "The function of a well-designed state intervention is not to deprive people of liberty but to build social capacity and infrastructure that helps people take responsibility for their wellbeing.",
+        "It is best to set boundaries in a way that takes into account the individual's underlying reasons for doing what they are doing to avoid unnecessary conflict and more stress."
+      ]
+    },
+    {
+      "pattern": "advcl+xcomp+nested",
+      "share": 0.0256,
+      "count": 50,
+      "examples": [
+        "At the most cutting-edge retail stores—Victoria Beckham on Dover Street, for instance—you don't go and stand at any kind of cash register when you decide to pay.",
+        "At the most cutting-edge retail stores Victoria Beckham on Dover Street, for instance you don't go and stand at any kind of cash register, when you decide to pay.",
+        "While it may sound safe to avoid all physical contact so as not to offend anyone, the lack of touching might imply cold attitudes or indifference in interpersonal relationships."
+      ]
+    },
+    {
+      "pattern": "relcl+advcl+xcomp+nested",
+      "share": 0.0246,
+      "count": 48,
+      "examples": [
+        "This comfortable cycle, in which the rhythms of the day helped shape the rhythms of the meals, gave rise to the custom of the large midday meal, eaten with the extended family.",
+        "As you become more capable of providing yourself with the approval you seek, your need for external validation will start to vanish, leaving you stronger, more confident, and yes, happier in your life.",
+        "If the very rich—the workers who have reaped above-average gains from the increased productivity since Keynes's time—can afford to work less, why do they continue to work so much? J"
+      ]
+    },
+    {
+      "pattern": "ccomp",
+      "share": 0.024,
+      "count": 47,
+      "examples": [
+        "Research by Erin Kelly, professor of work and organisation studies at MIT, shows companies and managers can play a key role in creating a better environment for workers. I",
+        "Peter Wohlleben's book The Hidden Life of Trees (2015), an international bestseller, suggests that trees can warn each other of danger through a \"wood wide web\" of roots and fungi(",
+        "One team of psychologists discovered that two-thirds of men and a quarter of women would rather self-administer electric shocks than sit alone with their thoughts for 15 minutes."
+      ]
+    }
+  ]
+}
