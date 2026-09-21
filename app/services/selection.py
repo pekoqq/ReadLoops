@@ -55,12 +55,44 @@ EXAM_LABELS = {
 # 库里有 18 万词，那样每次生成文章都要先把十万多行拉进内存（实测 0.19s 且随词库增长）。
 # 按 m_level 分别查（该列有索引）并各自 LIMIT，只用取到够用的量。
 
+# 功能词（封闭类）：冠词、介词、连词、代词、助动词、限定词。
+# ⚠️ 必须排除。实测：文章里出现过的功能词会被标成 m_level='seen'，
+# 然后被第 2 层「重遇」选中当目标生词 —— `the` 的 rank 是 1，还排在最前面。
+# 结果文章在「教」用户 the / and / have / for / you，质量自然上不去。
+STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "if", "while", "because", "so", "that",
+    "this", "these", "those", "it", "its", "they", "them", "their", "theirs",
+    "we", "our", "ours", "you", "your", "yours", "he", "him", "his", "she", "her",
+    "hers", "i", "me", "my", "mine", "who", "whom", "whose", "which", "what",
+    "when", "where", "why", "how", "all", "any", "both", "each", "few", "more",
+    "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same",
+    "than", "then", "too", "very", "can", "will", "just", "should", "now", "would",
+    "could", "may", "might", "must", "shall", "do", "does", "did", "done", "doing",
+    "have", "has", "had", "having", "be", "am", "is", "are", "was", "were", "been",
+    "being", "of", "to", "in", "on", "at", "for", "with", "from", "by", "as",
+    "into", "onto", "over", "under", "above", "below", "between", "among", "about",
+    "after", "before", "during", "through", "against", "without", "within", "upon",
+    "there", "here", "up", "down", "out", "off", "again", "further", "once",
+    "every", "either", "neither", "another", "much", "many", "one", "two", "three",
+    "also", "however", "therefore", "thus", "yet", "still", "even", "ever", "never",
+    "always", "often", "sometimes", "usually", "get", "got", "make", "made", "go",
+    "goes", "went", "gone", "come", "came", "take", "took", "taken", "give", "gave",
+}
+
+
+def _stopword_clause(col: str = "text") -> str:
+    """生成排除功能词的 SQL 片段（用 text 与 lemma 双查，兼容变形）。"""
+    words = ",".join(f"'{w}'" for w in sorted(STOPWORDS))
+    return f"AND lower({col}) NOT IN ({words})"
+
+
 # 候选池过滤：单词与短语的唯一区别就是「含不含空格 / type 值」。
 # 短语**不要求有释义**（它们本来就只有文本与频次），单词仍然要求有释义。
 _KIND_WHERE = {
     "word": ("type = 'word' AND meaning IS NOT NULL AND meaning != '' "
              "AND text GLOB '[a-z]*' AND text NOT LIKE '% %' "
-             "AND length(text) BETWEEN 3 AND 18"),
+             "AND length(text) BETWEEN 3 AND 18 "
+             + _stopword_clause("text")),
     # 短语额外要求「有词典来源的释义」。查不到来源说明它不是词汇单位
     # （只是碰巧连在一起的高频词，如 `young people` / `new study`），
     # 就不该硬造释义去教 —— 见 tools/enrich_phrases.py 的说明。
@@ -86,9 +118,17 @@ _BASE_WHERE = ""    # 兼容旧引用，实际用 _kind_where()
 _RANK = ""
 
 # 第 1 层：到期复习（按到期时间，最早的优先）
-def _tier_sql(kind: str) -> tuple[str, str, str]:
-    """按候选池类型生成三层查询。"""
+def _tier_sql(kind: str, vocab_floor: int = 0) -> tuple[str, str, str]:
+    """按候选池类型生成三层查询。
+
+    `vocab_floor`：已知集对应的词频上限。
+    ⚠️ 必须把它**下推到 SQL**。否则 tier3/4 会先取回「按词频排序的前 N 个未知词」，
+    而它们全落在已知集里（rank 1~2200），取回后又被 Python 侧过滤掉 ——
+    结果**一个目标词都选不出来**（实测生成的文章 target_words 为空）。
+    """
     where = _KIND_WHERE[kind]
+    if vocab_floor > 0 and kind == "word":
+        where += f" AND COALESCE(NULLIF(frq, 0), bnc, 0) > {int(vocab_floor)}"
     rank = _KIND_RANK[kind]
     rank_ok = _KIND_RANK_POSITIVE[kind]
     tier1 = f"""
@@ -181,7 +221,12 @@ def select_new_words(target_count: int = 10, exam: str | None = None,
     now = int(time.time())
     # 每层多取一些，抵消 exclude（最近 30 篇用过的词）造成的损耗
     ask = max(target_count * 3, 30)
-    q1, q2, q34 = _tier_sql(kind)
+    # 已知集：认识 top-2200 的人不该再被"教" the / every。
+    # 这比功能词表更根本 —— 已知集就是「你认识什么」的定义。
+    from app.services import known_set as _ks
+    _vocab, _ = _ks.vocab_size()
+    _known = _ks.build(_vocab) if kind == "word" else set()
+    q1, q2, q34 = _tier_sql(kind, _vocab)
 
     with get_db() as db:
         t1 = db.execute(q1, (now, ask)).fetchall()
@@ -207,6 +252,10 @@ def select_new_words(target_count: int = 10, exam: str | None = None,
             key = w.lower()          # 库里有 every / Every 这类大小写重复条目，
             if key in seen or key in exclude:
                 continue             # 不去重的话同一篇会埋进两个"同一个词"
+            # 已知集里的词不该当目标 —— 你认识 top-2200，就不该再被"教" the / every。
+            # 这比功能词表更根本：已知集就是「你认识什么」的定义。
+            if _known and key in _known:
+                continue
             seen.add(key)
             picks.append(w)
             if len(picks) >= target_count:

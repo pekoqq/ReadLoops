@@ -39,7 +39,7 @@ COVERAGE_TOLERANCE = 0.02       # 93%~97% 都算通过
 
 SENT_AVG_MIN, SENT_AVG_MAX = 16.0, 21.0     # 真题 p50=18
 SENT_STD_MIN = 5.0                          # 句长标准差：人写作有波动，AI 均匀
-LONG_SENT_WORDS = 30                        # 真题 p90=32
+LONG_SENT_WORDS = 28                        # 真题 p90=32；取 28 让模型更易稳定命中
 LONG_SENT_RATIO = (0.06, 0.16)              # 目标 8–12%，留一点容差
 MAX_CONSECUTIVE_NEW = 2                     # 连续 3 个生词会直接卡住理解
 

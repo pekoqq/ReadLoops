@@ -120,7 +120,8 @@ def _select_new_words(target_count):
     return selection.select_new_words(target_count=target_count, exclude=recent_used)
 
 
-def _generate_once(topic, opening, ending, new_words, target_phrases=None):
+def _generate_once(topic, opening, ending, new_words, target_phrases=None,
+                   reader_vocab: int = 0):
     """单次生成文章，不做去重检测。"""
     import json as _json
 
@@ -167,6 +168,18 @@ def _generate_once(topic, opening, ending, new_words, target_phrases=None):
     # 材料，可能是一本 19 世纪小说（实测《傲慢与偏见》短句占比 29% vs 四级真题
     # 10%、平均词长 4.41 vs 4.85），整篇文风会被带偏。
     # 现在：真题基准是骨架且排在前面，画像只作为「语气微调」出现在最后。
+    # 读者的词汇边界 —— 这是让文章「可读」的最关键约束。
+    # 此前 prompt 只说 "Use common CET-4 level words"，没有具体边界，
+    # 实测生成文章的覆盖率只有 68.8%~89.9%（目标 95%），远达不到可理解输入。
+    if not reader_vocab:
+        try:
+            from app.services import known_set
+            reader_vocab, _src = known_set.vocab_size()
+        except Exception:
+            reader_vocab = 2500
+    reader_note = ("" if reader_vocab >= 2000
+                   else " (a beginner-level reader, so keep it very simple)")
+
     active_style_hint = profile_prompt_hint()
     style_profile_block = (
         "\n=== OPTIONAL REGISTER NOTE (from your own materials) ===\n"
@@ -204,6 +217,19 @@ VOCABULARY:
 
 WORD FAMILIES (use these word forms naturally in context, not just the base word):
 {family_desc if family_desc else 'Use varied word forms (noun/verb/adjective) of key words naturally.'}
+
+=== READER'S VOCABULARY LIMIT (the single most important constraint) ===
+The reader is a Chinese college student who reliably knows roughly
+{reader_vocab} of the most frequent English words{reader_note}.
+
+EVERY word you write — except the TARGET WORDS listed below — must fall inside
+that vocabulary. Concretely:
+- Do NOT use low-frequency or technical words (e.g. instead of "respiratory",
+  write "breathing"; instead of "particulate matter", write "dust and smoke").
+- If you cannot express an idea with common words, choose a different angle.
+- The TARGET WORDS are the ONLY allowed exceptions.
+
+Aim for at least 95% of the running words to be within that vocabulary.
 
 TARGET PHRASES (naturally include at least 2 of these):
 {phrases_str}
@@ -371,6 +397,92 @@ def _local_vocab_parse(text: str) -> list[dict]:
     return _normalize_vocab_items(candidates)
 
 
+_KNOWN_CACHE: dict = {}
+
+
+def _reader_vocab() -> int:
+    """读者的词汇量估计（定级结果；没测过则用默认）。"""
+    try:
+        from app.services import known_set
+        return known_set.vocab_size()[0]
+    except Exception:
+        return 2500
+
+
+def _known_set() -> set:
+    """当前用户的已知集（构建一次后缓存 —— 词库不变时不必重算）。"""
+    if "s" not in _KNOWN_CACHE:
+        from app.services import known_set
+        _KNOWN_CACHE["s"] = known_set.build()
+    return _KNOWN_CACHE["s"]
+
+
+def _repair_once(content: str, title: str, data: dict, issues: list[str]) -> dict | None:
+    """带着具体问题清单，让模型定向重写。"""
+    from app.services.article_quality import repair_instruction
+
+    instruction = repair_instruction(issues)
+    prompt = (
+        f"{instruction}\n\n"
+        f"TITLE: {title}\n\nPASSAGE:\n{content}"
+    )
+    try:
+        raw = _chat([{"role": "user", "content": prompt}], max_tokens=1500, temperature=0.5)
+        fixed = _extract_json(raw)
+    except Exception as e:
+        print(f"定向修复失败: {e}")
+        return None
+    if not fixed or not fixed.get("content"):
+        return None
+    return {
+        "title": fixed.get("title") or title,
+        "content": fixed["content"],
+        # 保留调用方选定的目标词，不用模型自称的
+        "new_words": data.get("new_words", []),
+    }
+
+
+def _verify_and_repair(result: dict, *, known: set, target_words: list,
+                       target_phrases: list, topic: str, opening: str,
+                       ending: str, max_rounds: int = 2) -> dict:
+    """校验生成结果，不达标则定向修复。
+
+    返回 {"result": ..., "report": ..., "rounds": n, "ok": bool}
+    """
+    from app.services import article_quality as aq
+
+    current = result
+    report = aq.analyze(
+        current["content"], known=known,
+        target_words=list(target_words) + list(target_phrases or []),
+        target_grammar=["relative_clause", "passive"],
+    )
+    ok, issues = aq.verdict(report)
+    rounds = 0
+    while not ok and rounds < max_rounds:
+        print(f"质量不达标（{len(issues)} 项），第 {rounds+1} 轮定向修复："
+              f"{issues[0][:60]}…")
+        fixed = _repair_once(current["content"], current["title"], current, issues)
+        if not fixed:
+            break
+        cand = aq.analyze(
+            fixed["content"], known=known,
+            target_words=list(target_words) + list(target_phrases or []),
+            target_grammar=["relative_clause", "passive"],
+        )
+        cand_ok, cand_issues = aq.verdict(cand)
+        rounds += 1
+        # 只在**变好**时才接受修复结果，避免越修越差
+        if cand_ok or cand["coverage"] > report["coverage"]:
+            current, report, ok, issues = fixed, cand, cand_ok, cand_issues
+        else:
+            break
+    if not ok:
+        print(f"质量仍不达标（覆盖率 {report.get('coverage', 0)*100:.1f}%），"
+              f"按最好的一版保存并如实记录")
+    return {"result": current, "report": report, "rounds": rounds, "ok": ok}
+
+
 def generate_article(target_new_words=10):
     """生成一篇英语短文，严格参考四级真题阅读风格。
     加入去重检测：如果与最近文章太相似，换主题重新生成（最多3次）。
@@ -437,7 +549,8 @@ def generate_article(target_new_words=10):
         opening = random.choice(openings)
         ending = random.choice(endings)
 
-        result = _generate_once(topic, opening, ending, new_words, target_phrases)
+        result = _generate_once(topic, opening, ending, new_words, target_phrases,
+                                reader_vocab=_reader_vocab())
         if not result:
             continue
 
@@ -460,10 +573,30 @@ def generate_article(target_new_words=10):
     if not best_result:
         return None
 
+    # ---------------------------------------------------------------- 质量闭环
+    # 此前生成流程只「在 prompt 里提要求」，生成后**不做任何检查** ——
+    # 实测覆盖率只有 68.8%~76.4%，远低于可理解输入要求的 95%，且无人发现。
+    #
+    # 现在：生成 → 确定性评分 → 不达标就**定向修复** → 再评 → 最多 2 轮。
+    # 修复是「结果导向」的：无论模型怎么发挥，最终必须测出来达标。
+    quality = _verify_and_repair(
+        best_result,
+        known=_known_set(),
+        target_words=new_words,
+        target_phrases=target_phrases,
+        topic=topic,
+        opening=opening,
+        ending=ending,
+    )
+    best_result = quality["result"]
+
     # 保存文章
     title = best_result["title"]
     content = best_result["content"]
-    article_words = best_result["new_words"]
+    # ⚠️ 必须落**我们选的目标**，不是模型自称的 new_words。
+    # 模型经常漏用或改写目标词；若按它自称的存，重遇记录与掌握度会追踪错误的词，
+    # 而「12 次遇见」的累积正是靠这张表。
+    article_words = list(new_words)
 
     word_count = len(content.split())
     now = int(time.time())

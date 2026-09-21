@@ -107,9 +107,23 @@ def test_generate_article_returns_target_words(monkeypatch, seeded_style):
     """
     from app.services import ai as ai_mod
 
+    # 播种候选词，让 select_targets 真能选出东西来
+    with get_db() as db:
+        db.execute("DELETE FROM words")
+        db.executemany(
+            """INSERT INTO words (id, lemma, text, type, meaning, level, status, frq,
+                                  created_at, updated_at)
+               VALUES (?,?,?,'word','释义','CET4','new',?,0,0)""",
+            # ⚠️ frq 必须 > 已知集上限（默认 2500），否则会被选词排除
+            [(700001, "alpha", "alpha", 3000), (700002, "beta", "beta", 3200),
+             (700003, "gamma", "gamma", 3400), (700004, "delta", "delta", 3600)],
+        )
+
     def fake_chat(messages, max_tokens=1500, temperature=0.7, retries=2):
+        # 注意：模型**自称**的 new_words 与调用方选的目标词不同 ——
+        # 这正是要验证的：落库的必须是**调用方选的**，不是模型自称的。
         return json.dumps({"title": "T", "content": "word " * 320,
-                           "new_words": ["abandon", "consequence"]})
+                           "new_words": ["not", "selected"]})
 
     monkeypatch.setattr(ai_mod, "_chat", fake_chat)
     monkeypatch.setattr(ai_mod, "_select_new_words", lambda n: ["abandon", "consequence"])
@@ -119,4 +133,12 @@ def test_generate_article_returns_target_words(monkeypatch, seeded_style):
     art = ai_mod.generate_article(target_new_words=2)
     assert art is not None
     assert art.target_words, "target_words 不能是空的默认值"
-    assert json.loads(art.target_words) == ["abandon", "consequence"]
+
+    # ⚠️ 语义：落库的必须是**调用方 select_targets 选出的词**，
+    # 而不是模型在 JSON 里自称的 new_words —— 模型经常漏用或改写目标词，
+    # 按它自称的存会让重遇记录与掌握度追踪到错误的词，
+    # 而「12 次遇见」的累积正是靠这张表。
+    saved = json.loads(art.target_words)
+    assert "not" not in saved and "selected" not in saved, (
+        f"落库的是模型自称的词而不是我们选的：{saved}")
+    assert saved, "应当落库我们选出的目标词"

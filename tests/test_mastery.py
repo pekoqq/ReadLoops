@@ -197,10 +197,22 @@ def test_selection_prefers_reentry_gap(env):
 
 
 def test_selection_respects_target_exam(env):
-    """目标考试不同，选出的词必须不同。"""
+    """目标考试不同，选出的词必须不同。
+
+    ⚠️ 选词会**排除已知集**（词频 ≤ 词汇量估计的词 + 掌握度 recalled/recognized 的词），
+    所以这个测试必须自己造两个「已知集之外、m_level=unknown、带考试标签」的词，
+    否则两边都只剩 fixture 里的 rare，测不出分流。
+    """
     with get_db() as db:
-        db.execute("UPDATE words SET tags='cet4' WHERE id=2")
-        db.execute("UPDATE words SET tags='ielts' WHERE id=3")
+        db.executemany(
+            """INSERT INTO words (id, lemma, text, meaning, level, status, frq, bnc,
+                                  created_at, updated_at)
+               VALUES (?,?,?,'释义','CET4','new',?,0,0,0)""",
+            [(801, "cet4only", "cet4only", 6000),
+             (802, "ieltsonly", "ieltsonly", 6100)],
+        )
+        db.execute("UPDATE words SET tags='cet4' WHERE id=801")
+        db.execute("UPDATE words SET tags='ielts' WHERE id=802")
     mastery.refresh()
     cet4 = selection.select_new_words(50, exam="cet4")
     ielts = selection.select_new_words(50, exam="ielts")
@@ -212,8 +224,16 @@ def test_selection_respects_target_exam(env):
             ph = ",".join("?" * len(words))
             return {r[0] for r in db.execute(
                 f"SELECT id FROM words WHERE lower(text) IN ({ph})", tuple(w.lower() for w in words))}
-    # 若两考试候选都足够，tier3 部分应当不同
-    assert cet4 != ielts or not cet4
+    # 第 3 层按考试词表分流 —— 测的是**顺序**：目标考试自己的词应排在另一考试之前。
+    # （候选不够时第 4 层会兜底把两边的词都补进来，所以不能断言"不包含"。）
+    c4 = [w.lower() for w in cet4]
+    i6 = [w.lower() for w in ielts]
+    assert "cet4only" in c4 and "ieltsonly" in c4, f"cet4 候选不足：{c4}"
+    assert "ieltsonly" in i6 and "cet4only" in i6, f"ielts 候选不足：{i6}"
+    assert c4.index("cet4only") < c4.index("ieltsonly"), (
+        f"cet4 目标下 cet4only 应排在 ieltsonly 之前：{c4}")
+    assert i6.index("ieltsonly") < i6.index("cet4only"), (
+        f"ielts 目标下 ieltsonly 应排在 cet4only 之前：{i6}")
 
 
 def test_selection_dedupes_case_variants(env):
