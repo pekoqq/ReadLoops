@@ -180,31 +180,61 @@ def coverage_all(bands: Optional[list[dict]] = None) -> dict:
 # ---------------------------------------------------------------- 考试缺口
 
 def gap_by_exam(bands: Optional[list[dict]] = None) -> list[dict]:
-    """每场考试还差多少词（期望值，不设硬阈值）。"""
+    """每场考试还差多少词（期望值，不设硬阈值）。
+
+    ## 词表来源（这个选择影响很大）
+
+    优先用**官方考纲词表**（`app/services/exam_vocab.py`）。
+    退回 `words.tags` 只在官方词表缺失时发生 —— ECDICT 的 tag 是
+    「在哪个级别新学」的**增量**标注，而官方词表是**累积**的，
+    两者差 2,653 个词，会把「还差多少」低估约 1,300 词。
+    """
+    from app.services import exam_vocab
+
     bands = bands if bands is not None else band_rates()
     rate_by_lo = {b["band_lo"]: b["rate"] for b in bands}
 
-    out = []
-    with get_db() as db:
-        rows = db.execute(
-            """SELECT tags, COALESCE(NULLIF(frq, 0), bnc, 0) AS rank FROM words
-               WHERE tags IS NOT NULL AND tags != ''
-                 AND meaning IS NOT NULL AND meaning != ''"""
-        ).fetchall()
-
     by_exam: dict[str, list[float]] = {k: [] for k, _ in EXAMS}
-    for r in rows:
-        tags = set((r["tags"] or "").split())
-        rate = 0.0
-        frq = r["rank"] or 0
-        for lo, hi in placement.BANDS:
-            if frq and lo <= frq <= hi:
-                rate = rate_by_lo.get(lo, 0.0)
-                break
-        for k, _ in EXAMS:
-            if k in tags:
-                by_exam[k].append(rate)
 
+    def rate_of(rank: int) -> float:
+        for lo, hi in placement.BANDS:
+            if rank and lo <= rank <= hi:
+                return rate_by_lo.get(lo, 0.0)
+        return 0.0
+
+    with get_db() as db:
+        # 有官方词表的（四级/六级）走官方口径
+        for k, _ in EXAMS:
+            if not exam_vocab.has_official(k):
+                continue
+            want = exam_vocab.lemmas(k)
+            if not want:
+                continue
+            ph = ",".join("?" * len(want))
+            rows = db.execute(
+                f"""SELECT COALESCE(NULLIF(frq, 0), bnc, 0) AS rank FROM words
+                    WHERE lower(text) IN ({ph})""",
+                tuple(want)).fetchall()
+            by_exam[k] = [rate_of(r["rank"] or 0) for r in rows]
+            # 词表里库内没有的词，按最生僻处理（rate 0）
+            by_exam[k] += [0.0] * max(0, len(want) - len(rows))
+
+        # 没有官方词表的（考研/雅思/托福/GRE）继续用 tags
+        need_tags = [k for k, _ in EXAMS if not by_exam[k]]
+        if need_tags:
+            rows = db.execute(
+                """SELECT tags, COALESCE(NULLIF(frq, 0), bnc, 0) AS rank FROM words
+                   WHERE tags IS NOT NULL AND tags != ''
+                     AND meaning IS NOT NULL AND meaning != ''"""
+            ).fetchall()
+            for r in rows:
+                tags = set((r["tags"] or "").split())
+                rate = rate_of(r["rank"] or 0)
+                for k in need_tags:
+                    if k in tags:
+                        by_exam[k].append(rate)
+
+    out = []
     for k, name in EXAMS:
         rates = by_exam[k]
         size = len(rates)
