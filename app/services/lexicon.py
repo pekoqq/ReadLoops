@@ -77,11 +77,27 @@ def _rev_index() -> dict[str, str]:
     if _REV is not None:
         return _REV
 
+    # 词频表：用于判断「反查方向」是否合理
+    with get_db() as db:
+        rfreq = {r["t"]: (r["r"] or 10 ** 9) for r in db.execute(
+            "SELECT lower(text) t, COALESCE(NULLIF(frq, 0), bnc, 0) AS r FROM words")}
+
+    def better_lemma(form: str, lemma: str) -> bool:
+        """只在**原形比变形更常见**时才反向。
+
+        ⚠️ 否则会把常见词还原成罕见词，让覆盖率被低估。实测两例：
+          `data`   (rank ~300)   → `datum` (28458)   ✗
+          `number` (rank ~150)   → `numb`  (9317)    ✗
+        这些都是形态学上「正确」的拉丁/规则变化，但对「读者认不认识这个词」
+        这个判断毫无帮助 —— 读者认的是 data，不是 datum。
+        """
+        return rfreq.get(lemma, 10 ** 9) <= rfreq.get(form, 10 ** 9)
+
     rev: dict[str, str] = {}
     # 优先：预构建索引的逆向
     for lemma, forms in _forms_index().items():
         for f in forms:
-            if f and f != lemma:
+            if f and f != lemma and better_lemma(f, lemma):
                 rev.setdefault(f, lemma)
     if rev:
         _REV = rev

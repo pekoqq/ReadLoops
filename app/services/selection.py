@@ -252,7 +252,7 @@ def select_new_words(target_count: int = 10, exam: str | None = None,
     # 这比功能词表更根本 —— 已知集就是「你认识什么」的定义。
     from app.services import known_set as _ks
     _vocab, _ = _ks.vocab_size()
-    _known = _ks.build(_vocab) if kind == "word" else set()
+    _known = _ks.build(_vocab, for_selection=True) if kind == "word" else set()
     q1, q2, q34 = _tier_sql(kind, _vocab)
 
     with get_db() as db:

@@ -36,6 +36,20 @@ from app.database import get_db
 
 # 定级测试没做过时的兜底词汇量
 DEFAULT_VOCAB = 2500
+
+# 「识别缓冲区」：用于**覆盖率校验**的词频上限放大系数。
+#
+# 定级测出的是读者的**核心**词汇量（能可靠运用的部分）。但阅读时的**识别**词汇量
+# 明显更大 —— 一个核心词汇 2,200 的读者，对 2,200–4,000 频段的词大多也「看着眼熟、
+# 能猜出大意」，这正是 Hu & Nation (2000) 说的「可理解」而非「能产出」。
+#
+# 不加这个缓冲的话，覆盖率会被系统性低估：实测一篇 350 词的文章里，
+# `digital`(rank 2356) / `online`(2257) / `percent`(2802) 这类**中等常见词**
+# 会被算成生词，覆盖率从 95% 掉到 92%，于是校验循环永远判不达标、
+# 反复要求模型把文章改简单 —— 那是把好文章改坏。
+#
+# ⚠️ 只用于覆盖率校验；**选词**不受影响（选词要的是「核心词汇之外」的词）。
+RECOGNITION_BUFFER = 1.6
 # 低于此值的结果不可信（多半是测试没认真做），退回兜底
 MIN_SANE_VOCAB = 500
 
@@ -59,23 +73,38 @@ def vocab_size() -> tuple[int, str]:
     return DEFAULT_VOCAB, "默认假设"
 
 
-def build(vocab: Optional[int] = None, exam: Optional[str] = None) -> set[str]:
+def build(vocab: Optional[int] = None, exam: Optional[str] = None,
+          for_selection: bool = False) -> set[str]:
     """构建已知集（**表面形式**集合，可直接用于 token 匹配）。
 
+    ## 两个用途必须分开（`for_selection`）
+
+    「已知集」在两个地方被用到，而它们的**语义相反**：
+
+    | 用途 | 含义 | 查过的词算不算已知 |
+    |---|---|---|
+    | **覆盖率校验**（默认） | 读者「能不能读懂」这段文字 | **算** —— 查过一次不等于不认识，    而且它可能是文章里顺带出现的常见词，算成生词会让覆盖率过于悲观 |
+    | **选词**（`for_selection=True`） | 哪些词「该被重新埋进文章」 | **不算** ——    你查过它，正是最该在不同语境再遇见的 |
+
+    之前用一个集合兼顾两者，于是要么重遇失效（旧的 bug），
+    要么覆盖率被低估（实测非目标词覆盖率掉到 90.8%）。
+
     参数：
-      vocab — 词汇量；缺省用定级结果
-      exam  — 若给出（如 'cet4'），额外把**官方考纲词表里等级低于目标考试**的词
-              也算作已知（因为那些是更早阶段就该掌握的）
+      vocab         — 词汇量；缺省用定级结果
+      exam          — 若给出（如 'cet4'），额外把官方考纲词表里更低级别的词也算已知
+      for_selection — True 时把「查过的词」从已知集剔除（选词用）
     """
     if vocab is None:
         vocab, _ = vocab_size()
+    # 覆盖率校验时放大到「识别词汇量」；选词时用核心词汇量（见 RECOGNITION_BUFFER）
+    cutoff = vocab if for_selection else int(vocab * RECOGNITION_BUFFER)
 
     lemmas: set[str] = set()
     with get_db() as db:
         # ① 最高频 N 个词
         for r in db.execute(
             "SELECT lower(text) t FROM words "
-            "WHERE COALESCE(NULLIF(frq, 0), bnc, 0) BETWEEN 1 AND ?", (vocab,)
+            "WHERE COALESCE(NULLIF(frq, 0), bnc, 0) BETWEEN 1 AND ?", (cutoff,)
         ):
             lemmas.add(r["t"])
         # ② 掌握度确认的词（强制算已知，无论词频高低）
@@ -93,7 +122,10 @@ def build(vocab: Optional[int] = None, exam: Optional[str] = None) -> set[str]:
                 "SELECT lower(text) t FROM words WHERE COALESCE(lookup_count, 0) > 0")
         }
 
-    lemmas -= looked_up
+    # ⚠️ 只有**选词**才剔除查过的词。覆盖率校验必须保留它们 ——
+    # 查过一次不等于不认识，而且它们可能只是顺带出现在文中的常见词。
+    if for_selection:
+        lemmas -= looked_up
 
     # ④ 展开成「原形 + 全部变形」
     from app.services import lexicon
